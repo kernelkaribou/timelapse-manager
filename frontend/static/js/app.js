@@ -75,7 +75,23 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Setup range checkbox
     document.getElementById('use_range').addEventListener('change', (e) => {
-        document.getElementById('capture-range').style.display = e.target.checked ? 'flex' : 'none';
+        const captureRange = document.getElementById('capture-range');
+        const startTimeInput = document.getElementById('start_time');
+        const endTimeInput = document.getElementById('end_time');
+        
+        if (e.target.checked) {
+            captureRange.style.display = 'flex';
+            startTimeInput.disabled = false;
+            endTimeInput.disabled = false;
+            // Update duration estimate for the selected time range
+            updateVideoDurationEstimate();
+        } else {
+            captureRange.style.display = 'none';
+            startTimeInput.disabled = true;
+            endTimeInput.disabled = true;
+            // Revert to showing full duration estimate
+            updateVideoDurationEstimate();
+        }
     });
     
     // Prevent Enter key from submitting forms
@@ -227,15 +243,17 @@ async function showJobDetails(jobId) {
                 
                 <div class="job-info" style="margin-bottom: 1.5rem;">
                     <div><strong>Name:</strong> ${escapeHtml(job.name)}</div>
-                    <div><strong>Stream Type:</strong> ${job.stream_type.toUpperCase()}</div>
                     <div><strong>Status:</strong> <span class="job-status ${job.warning_message ? 'warning' : job.status}">${job.warning_message ? '⚠ Warning' : (job.status.charAt(0).toUpperCase() + job.status.slice(1))}</span></div>
-                    <div><strong>Framerate:</strong> ${job.framerate} FPS</div>
                     <div><strong>Start:</strong> ${formatDateTime(job.start_datetime)}</div>
-                    <div><strong>Captures:</strong> ${job.capture_count}</div>
-                    <div><strong>Storage:</strong> ${formatBytes(job.storage_size)}</div>
-                    <div><strong>Path:</strong> ${escapeHtml(job.capture_path)}</div>
                 </div>
-                
+
+                <div class="form-group" style="margin-bottom: 1.5rem;">
+                    <label>End Date & Time ${job.end_datetime ? '' : '(Currently ongoing)'}</label>
+                    <input type="datetime-local" id="edit_end_datetime" class="form-control" value="${currentEndTime}" min="${minEndTime}">
+                    <small style="color: var(--text-secondary);">Leave empty for ongoing capture, or set to at least ${job.interval_seconds}s in the future</small>
+                    <button class="btn btn-primary btn-sm" style="margin-top: 0.5rem;" onclick="updateJobEndTime(${job.id})">Update End Time</button>
+                </div>
+
                 <div class="form-group" style="margin-bottom: 1rem;">
                     <label>Stream URL</label>
                     <input type="text" id="edit_url" class="form-control" value="${escapeHtml(job.url)}">
@@ -249,11 +267,10 @@ async function showJobDetails(jobId) {
                     <button class="btn btn-primary btn-sm" style="margin-top: 0.5rem;" onclick="updateJobInterval(${job.id})">Update Interval</button>
                 </div>
                 
-                <div class="form-group" style="margin-bottom: 1.5rem;">
-                    <label>End Date & Time ${job.end_datetime ? '' : '(Currently ongoing)'}</label>
-                    <input type="datetime-local" id="edit_end_datetime" class="form-control" value="${currentEndTime}" min="${minEndTime}">
-                    <small style="color: var(--text-secondary);">Leave empty for ongoing capture, or set to at least ${job.interval_seconds}s in the future</small>
-                    <button class="btn btn-primary btn-sm" style="margin-top: 0.5rem;" onclick="updateJobEndTime(${job.id})">Update End Time</button>
+                <div class="job-info" style="margin-bottom: 1.5rem;">
+                    <div><strong>Captures:</strong> ${job.capture_count}</div>
+                    <div><strong>Storage:</strong> ${formatBytes(job.storage_size)}</div>
+                    <div><strong>Path:</strong> ${escapeHtml(job.capture_path)}</div>
                 </div>
                 
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;">
@@ -561,13 +578,13 @@ function renderVideos(videos) {
 
 async function showProcessVideoModal(jobId, jobName) {
     try {
-        // Fetch job data and capture count
-        const [job, capturesResponse] = await Promise.all([
+        // Fetch job data and capture time range (not all captures)
+        const [job, timeRange] = await Promise.all([
             fetch(`${API_BASE}/jobs/${jobId}`).then(r => r.json()),
-            fetch(`${API_BASE}/captures/?job_id=${jobId}&limit=100000`).then(r => r.json())
+            fetch(`${API_BASE}/captures/job/${jobId}/time-range`).then(r => r.json())
         ]);
         
-        const captureCount = capturesResponse.length;
+        const captureCount = timeRange.count;
         console.log(`Job ${jobId} (${jobName}): Found ${captureCount} captures`);
         
         // Set values
@@ -582,6 +599,38 @@ async function showProcessVideoModal(jobId, jobName) {
         document.getElementById('video_framerate').setAttribute('data-capture-count', captureCount);
         console.log(`Set data-capture-count attribute to: ${captureCount}`);
         
+        // Set time range inputs to first and last capture times
+        if (captureCount > 0) {
+            const startTimeInput = document.getElementById('start_time');
+            const endTimeInput = document.getElementById('end_time');
+            
+            const firstTime = toLocalDateTimeString(timeRange.first_capture_time);
+            const lastTime = toLocalDateTimeString(timeRange.last_capture_time);
+            
+            startTimeInput.value = firstTime;
+            startTimeInput.min = firstTime;
+            startTimeInput.max = lastTime;
+            
+            endTimeInput.value = lastTime;
+            endTimeInput.min = firstTime;
+            endTimeInput.max = lastTime;
+            
+            // Ensure inputs are disabled initially (since use_range is unchecked)
+            startTimeInput.disabled = true;
+            endTimeInput.disabled = true;
+            
+            // Store job ID for time range queries
+            window.currentJobId = jobId;
+            
+            // Add debounced listeners to update duration when time range changes
+            startTimeInput.addEventListener('change', debounce(updateVideoDurationEstimate, 500));
+            endTimeInput.addEventListener('change', debounce(updateVideoDurationEstimate, 500));
+        }
+        
+        // Reset the use_range checkbox
+        document.getElementById('use_range').checked = false;
+        document.getElementById('capture-range').style.display = 'none';
+        
         // Calculate and display initial duration
         updateVideoDurationEstimate();
         
@@ -593,13 +642,43 @@ async function showProcessVideoModal(jobId, jobName) {
 }
 
 function updateVideoDurationEstimate() {
-    const framerateInput = document.getElementById('video_framerate');
-    const framerate = parseInt(framerateInput.value) || 30;
-    const captureCount = parseInt(framerateInput.getAttribute('data-capture-count')) || 0;
+    const framerate = parseInt(document.getElementById('video_framerate').value) || 30;
+    const useRange = document.getElementById('use_range').checked;
     
+    // If custom time range is selected, fetch count for that range
+    if (useRange) {
+        const startTimeInput = document.getElementById('start_time');
+        const endTimeInput = document.getElementById('end_time');
+        
+        if (!startTimeInput.value || !endTimeInput.value || !window.currentJobId) return;
+        
+        // Convert input times to ISO strings for API query
+        const startTimeStr = toISOStringForQuery(startTimeInput.value, false);
+        const endTimeStr = toISOStringForQuery(endTimeInput.value, true);
+        
+        // Query the backend for capture count in this time range
+        fetch(`${API_BASE}/captures/job/${window.currentJobId}/time-range?start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`)
+            .then(r => r.json())
+            .then(data => {
+                displayDurationEstimate(data.count, framerate);
+            })
+            .catch(error => {
+                console.error('Failed to get capture count:', error);
+            });
+    } else {
+        // Use full capture count from data attribute
+        const captureCount = parseInt(document.getElementById('video_framerate').getAttribute('data-capture-count')) || 0;
+        displayDurationEstimate(captureCount, framerate);
+    }
+}
+
+function displayDurationEstimate(captureCount, framerate) {
     if (captureCount === 0) {
-        document.getElementById('video-duration-estimate').innerHTML = 
-            '<p style="color: var(--text-secondary);">No captures available for this job yet.</p>';
+        const useRange = document.getElementById('use_range').checked;
+        const message = useRange 
+            ? '<p style="color: #dc3545; font-weight: 600;"><strong>Warning:</strong> No captures in selected time range!</p>'
+            : '<p style="color: var(--text-secondary);">No captures available for this job yet.</p>';
+        document.getElementById('video-duration-estimate').innerHTML = message;
         return;
     }
     
@@ -608,10 +687,24 @@ function updateVideoDurationEstimate() {
     const seconds = Math.floor(durationSeconds % 60);
     
     document.getElementById('video-duration-estimate').innerHTML = `
-        <p><strong>Estimated Duration:</strong> ${minutes}m ${seconds}s</p>
         <p style="font-size: 0.875rem; color: var(--text-secondary);">${captureCount} captures at ${framerate} FPS</p>
+        <p>${minutes}m ${seconds}s</p>
     `;
 }
+
+// Debounce helper function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 function toggleCustomResolution() {
     const resolutionSelect = document.getElementById('video_resolution');
     const customResolutionDiv = document.getElementById('custom-resolution');
@@ -647,8 +740,8 @@ async function processVideo(event) {
         resolution: resolution,
         framerate: parseInt(document.getElementById('video_framerate').value),
         quality: document.getElementById('video_quality').value,
-        start_capture_id: useRange ? parseInt(document.getElementById('start_capture_id').value) || null : null,
-        end_capture_id: useRange ? parseInt(document.getElementById('end_capture_id').value) || null : null
+        start_time: useRange ? toISOStringForQuery(document.getElementById('start_time').value, false) : null,
+        end_time: useRange ? toISOStringForQuery(document.getElementById('end_time').value, true) : null
     };
     
     try {
@@ -805,6 +898,37 @@ function toLocalDateTimeString(isoString) {
     // Adjust for timezone offset to get local time
     date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
     return date.toISOString().slice(0, 16);
+}
+
+function toUTCString(localDateTimeString) {
+    // Convert datetime-local format (YYYY-MM-DDTHH:mm) to ISO string format
+    // Note: Backend stores in local time, not UTC, so we format as local ISO
+    // Since datetime-local doesn't include seconds, we use :00 for start times
+    // and :59 for end times to be more inclusive
+    if (!localDateTimeString) return null;
+    const date = new Date(localDateTimeString);
+    // Format as ISO but without timezone info to match backend's datetime.now() format
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
+function toISOStringForQuery(localDateTimeString, isEndTime) {
+    // Convert datetime-local format to ISO string for database queries
+    // For end times, add 59 seconds to include the entire minute
+    if (!localDateTimeString) return null;
+    const date = new Date(localDateTimeString);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = isEndTime ? '59' : '00';  // Use 59 for end times to be inclusive
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 function formatBytes(bytes) {

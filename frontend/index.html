@@ -199,7 +199,7 @@
                     </div>
                     <div class="form-group flex-1">
                         <label>Estimated Duration</label>
-                        <div class="duration-estimate" id="video-duration-estimate" style="margin-top: 0.5rem;"></div>
+                        <div class="duration-estimate" id="video-duration-estimate" style="margin-top: 0.2rem;"></div>
                     </div>
                 </div>
 
@@ -237,19 +237,20 @@
                 </div>
 
                 <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="use_range"> Use custom capture range
-                    </label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="checkbox" id="use_range">
+                        <span>Use custom time range</span>
+                    </div>
                 </div>
 
                 <div id="capture-range" class="form-row" style="display: none;">
                     <div class="form-group flex-1">
-                        <label>Start Capture ID</label>
-                        <input type="number" id="start_capture_id" class="form-control" min="1">
+                        <label>Start Time</label>
+                        <input type="datetime-local" id="start_time" class="form-control">
                     </div>
                     <div class="form-group flex-1">
-                        <label>End Capture ID</label>
-                        <input type="number" id="end_capture_id" class="form-control" min="1">
+                        <label>End Time</label>
+                        <input type="datetime-local" id="end_time" class="form-control">
                     </div>
                 </div>
 

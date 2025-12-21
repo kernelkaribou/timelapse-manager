@@ -82,6 +82,8 @@ class VideoCreate(BaseModel):
     quality: str = Field(default="high", pattern=r"^(low|medium|high|lossless)$")
     start_capture_id: Optional[int] = None
     end_capture_id: Optional[int] = None
+    start_time: Optional[str] = None  # ISO datetime string
+    end_time: Optional[str] = None  # ISO datetime string
 
 
 class VideoResponse(BaseModel):
@@ -95,6 +97,8 @@ class VideoResponse(BaseModel):
     quality: str
     start_capture_id: Optional[int]
     end_capture_id: Optional[int]
+    start_time: Optional[str]
+    end_time: Optional[str]
     total_frames: int
     duration_seconds: float
     status: str

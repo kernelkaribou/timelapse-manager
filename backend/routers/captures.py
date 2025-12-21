@@ -89,3 +89,40 @@ async def get_capture_count(job_id: int):
         count = cursor.fetchone()[0]
         
         return {"job_id": job_id, "count": count}
+
+
+@router.get("/job/{job_id}/time-range")
+async def get_capture_time_range(
+    job_id: int,
+    start_time: Optional[str] = Query(None, description="Start time for filtering (ISO format)"),
+    end_time: Optional[str] = Query(None, description="End time for filtering (ISO format)")
+):
+    """Get capture count and first/last capture times for a job, optionally filtered by time range"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Build query based on time filters
+        if start_time and end_time:
+            # Count captures in time range
+            cursor.execute("""
+                SELECT COUNT(*), MIN(captured_at), MAX(captured_at)
+                FROM captures
+                WHERE job_id = ? AND captured_at >= ? AND captured_at <= ?
+            """, (job_id, start_time, end_time))
+        else:
+            # Get overall stats
+            cursor.execute("""
+                SELECT COUNT(*), MIN(captured_at), MAX(captured_at)
+                FROM captures
+                WHERE job_id = ?
+            """, (job_id,))
+        
+        row = cursor.fetchone()
+        count, first_time, last_time = row
+        
+        return {
+            "job_id": job_id,
+            "count": count,
+            "first_capture_time": first_time,
+            "last_capture_time": last_time
+        }

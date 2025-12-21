@@ -21,6 +21,8 @@ def process_video(
     quality: str,
     start_capture_id: Optional[int],
     end_capture_id: Optional[int],
+    start_time: Optional[str],
+    end_time: Optional[str],
     output_path: str
 ):
     """
@@ -32,12 +34,16 @@ def process_video(
         resolution: Output resolution (e.g., "1920x1080")
         framerate: Output framerate
         quality: Quality setting (low, medium, high, lossless)
-        start_capture_id: First capture to include (optional)
-        end_capture_id: Last capture to include (optional)
+        start_capture_id: First capture to include (optional, for backward compatibility)
+        end_capture_id: Last capture to include (optional, for backward compatibility)
+        start_time: Start timestamp for captures (optional)
+        end_time: End timestamp for captures (optional)
         output_path: Path to save the output video
     """
     try:
         logger.info(f"Starting video processing for video_id={video_id}")
+        logger.info(f"Time range: start_time={start_time}, end_time={end_time}")
+        logger.info(f"ID range: start_capture_id={start_capture_id}, end_capture_id={end_capture_id}")
         
         # Get captures for this job
         with get_db() as conn:
@@ -46,15 +52,25 @@ def process_video(
             query = "SELECT * FROM captures WHERE job_id = ?"
             params = [job_dict['id']]
             
-            if start_capture_id:
+            # Prefer time-based filtering over ID-based filtering
+            if start_time:
+                query += " AND captured_at >= ?"
+                params.append(start_time)
+            elif start_capture_id:
                 query += " AND id >= ?"
                 params.append(start_capture_id)
             
-            if end_capture_id:
+            if end_time:
+                query += " AND captured_at <= ?"
+                params.append(end_time)
+            elif end_capture_id:
                 query += " AND id <= ?"
                 params.append(end_capture_id)
             
             query += " ORDER BY captured_at ASC"
+            
+            logger.info(f"Query: {query}")
+            logger.info(f"Params: {params}")
             
             cursor.execute(query, params)
             captures = cursor.fetchall()

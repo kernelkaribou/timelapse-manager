@@ -75,6 +75,8 @@ def init_db():
                 quality TEXT NOT NULL,
                 start_capture_id INTEGER,
                 end_capture_id INTEGER,
+                start_time TEXT,
+                end_time TEXT,
                 total_frames INTEGER NOT NULL,
                 duration_seconds REAL NOT NULL,
                 status TEXT DEFAULT 'processing',
@@ -119,6 +121,14 @@ def init_db():
         columns = [col[1] for col in cursor.fetchall()]
         if 'warning_message' not in columns:
             cursor.execute("ALTER TABLE jobs ADD COLUMN warning_message TEXT")
+        
+        # Migration: Add start_time and end_time columns to processed_videos if they don't exist
+        cursor.execute("PRAGMA table_info(processed_videos)")
+        video_columns = [col[1] for col in cursor.fetchall()]
+        if 'start_time' not in video_columns:
+            cursor.execute("ALTER TABLE processed_videos ADD COLUMN start_time TEXT")
+        if 'end_time' not in video_columns:
+            cursor.execute("ALTER TABLE processed_videos ADD COLUMN end_time TEXT")
         
         conn.commit()
 

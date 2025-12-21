@@ -43,12 +43,12 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
             INSERT INTO processed_videos (
                 job_id, name, file_path, file_size, resolution,
                 framerate, quality, start_capture_id, end_capture_id,
-                total_frames, duration_seconds, status, created_at
-            ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, 0, 0, 'processing', ?)
+                start_time, end_time, total_frames, duration_seconds, status, created_at
+            ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'processing', ?)
         """, (
             video.job_id, video.name, output_path, video.resolution,
             video.framerate, video.quality, video.start_capture_id,
-            video.end_capture_id, now
+            video.end_capture_id, video.start_time, video.end_time, now
         ))
         
         video_id = cursor.lastrowid
@@ -63,6 +63,8 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
             quality=video.quality,
             start_capture_id=video.start_capture_id,
             end_capture_id=video.end_capture_id,
+            start_time=video.start_time,
+            end_time=video.end_time,
             output_path=output_path
         )
         
