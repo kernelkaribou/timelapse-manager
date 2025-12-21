@@ -1,0 +1,32 @@
+services:
+  timelapser:
+    build: .
+    container_name: timelapser
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount for captures storage
+      - ./captures:/mnt/captures
+      # Mount for processed videos
+      - ./timelapses:/mnt/timelapses
+      # Mount for persistent database
+      - ./data:/app/backend/data
+    environment:
+      - PORT=8080
+      - TZ=America/Chicago
+      - DATABASE_PATH=/app/backend/data/timelapser.db
+      - DEFAULT_CAPTURES_PATH=/mnt/captures
+      - DEFAULT_VIDEOS_PATH=/mnt/timelapses
+      - FFMPEG_TIMEOUT=30
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  captures:
+  timelapses:
+  data:
