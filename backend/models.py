@@ -2,7 +2,7 @@
 Pydantic models for request/response validation
 """
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from enum import Enum
 
@@ -144,3 +144,17 @@ class DurationCalculation(BaseModel):
 class DurationEstimate(BaseModel):
     captures: int
     calculations: List[DurationCalculation]
+
+
+class MaintenanceResult(BaseModel):
+    job_id: int
+    job_name: str
+    total_captures: int
+    missing_files: List[Dict[str, Any]]
+    missing_count: int
+    existing_count: int
+    total_size_recovered: int
+
+
+class MaintenanceCleanup(BaseModel):
+    capture_ids: List[int]

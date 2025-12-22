@@ -7,10 +7,12 @@ from datetime import datetime
 import os
 import logging
 
-from ..models import JobCreate, JobUpdate, JobResponse, TestUrlResponse, DurationEstimate, DurationCalculation
+from ..models import JobCreate, JobUpdate, JobResponse, TestUrlResponse, DurationEstimate, DurationCalculation, MaintenanceResult, MaintenanceCleanup
 from ..database import get_db, dict_from_row
 from ..services.url_tester import test_stream_url
 from ..services.duration_calculator import calculate_duration
+from ..services.maintenance import scan_job_files, cleanup_missing_captures
+from ..utils import get_now, to_iso
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -49,7 +51,7 @@ async def create_job(job: JobCreate):
                 detail=f"No write permission for capture path: {job.capture_path}"
             )
         
-        now = datetime.now().astimezone().isoformat()
+        now = to_iso(get_now())
         
         # Insert job first to get the ID
         cursor.execute("""
@@ -60,8 +62,8 @@ async def create_job(job: JobCreate):
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             job.name, job.url, job.stream_type.value,
-            job.start_datetime.isoformat(),
-            job.end_datetime.isoformat() if job.end_datetime else None,
+            to_iso(job.start_datetime),
+            to_iso(job.end_datetime) if job.end_datetime else None,
             job.interval_seconds, job.framerate, "",  # Will update capture_path next
             job.naming_pattern,
             now, now
@@ -166,14 +168,14 @@ async def update_job(job_id: int, job_update: JobUpdate):
         
         if job_update.start_datetime is not None:
             updates.append("start_datetime = ?")
-            values.append(job_update.start_datetime.isoformat())
+            values.append(to_iso(job_update.start_datetime))
         
         # Validate and handle end_datetime if being updated
         if hasattr(job_update, 'end_datetime') and job_update.model_fields_set and 'end_datetime' in job_update.model_fields_set:
             end_time = job_update.end_datetime
             
             if end_time is not None:
-                now = datetime.now()
+                now = get_now()
                 
                 # Check if end time is in the past
                 if end_time <= now:
@@ -194,7 +196,7 @@ async def update_job(job_id: int, job_update: JobUpdate):
             
             # Add to updates (can be None for ongoing jobs)
             updates.append("end_datetime = ?")
-            values.append(end_time.isoformat() if end_time else None)
+            values.append(to_iso(end_time) if end_time else None)
         
         if job_update.interval_seconds is not None:
             updates.append("interval_seconds = ?")
@@ -212,7 +214,7 @@ async def update_job(job_id: int, job_update: JobUpdate):
             raise HTTPException(status_code=400, detail="No updates provided")
         
         updates.append("updated_at = ?")
-        values.append(datetime.now().astimezone().isoformat())
+        values.append(to_iso(get_now()))
         values.append(job_id)
         
         query = f"UPDATE jobs SET {', '.join(updates)} WHERE id = ?"
@@ -305,3 +307,43 @@ async def get_latest_image(job_id: int):
             raise HTTPException(status_code=404, detail="No captures found for this job")
         
         return {"file_path": row[0]}
+
+
+@router.post("/{job_id}/maintenance/scan", response_model=MaintenanceResult)
+async def scan_job_maintenance(job_id: int):
+    """
+    Scan a job's captures to identify missing files on disk.
+    Returns a list of captures that reference files that no longer exist.
+    """
+    try:
+        result = scan_job_files(job_id)
+        logger.info(f"Maintenance scan completed for job {job_id}: "
+                   f"{result['missing_count']} missing files found")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during maintenance scan for job {job_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Maintenance scan failed: {str(e)}")
+
+
+@router.post("/{job_id}/maintenance/cleanup")
+async def cleanup_job_maintenance(job_id: int, cleanup: MaintenanceCleanup):
+    """
+    Remove database records for captures that are missing on disk.
+    This endpoint should be called after scan to confirm which records to delete.
+    """
+    try:
+        if not cleanup.capture_ids:
+            raise HTTPException(status_code=400, detail="No capture IDs provided")
+        
+        result = cleanup_missing_captures(job_id, cleanup.capture_ids)
+        logger.info(f"Maintenance cleanup completed for job {job_id}: "
+                   f"{result['deleted_count']} records removed")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during maintenance cleanup for job {job_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Maintenance cleanup failed: {str(e)}")
+

@@ -28,3 +28,14 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # FFMPEG settings
 FFMPEG_TIMEOUT = int(os.getenv("FFMPEG_TIMEOUT", 30))
+
+# Timezone Configuration
+# The TZ environment variable determines the timezone for all datetime operations
+# This includes:
+# - Job scheduling and capture timing
+# - Timestamp generation for filenames
+# - Database timestamp storage (stored as ISO with timezone info)
+# - API responses
+# Set via docker-compose.yml environment variable, e.g., TZ=America/Chicago
+# Default: UTC
+TIMEZONE = os.getenv("TZ", "UTC")

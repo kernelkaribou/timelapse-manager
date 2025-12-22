@@ -11,6 +11,7 @@ import logging
 from ..models import VideoCreate, VideoResponse
 from ..database import get_db, dict_from_row
 from ..services.video_processor import process_video
+from ..utils import get_now, to_iso
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
             videos_path = config.DEFAULT_VIDEOS_PATH
         
         # Create video record - name already includes timestamp from frontend
-        now = datetime.now().astimezone().isoformat()
+        now = to_iso(get_now())
         output_path = os.path.join(videos_path, f"{video.name}.mp4")
         
         cursor.execute("""

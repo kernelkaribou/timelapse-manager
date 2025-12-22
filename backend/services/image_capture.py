@@ -3,19 +3,14 @@ Image capture service - handles capturing images from HTTP and RTSP streams
 """
 import subprocess
 import os
-from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import logging
 
 from ..database import get_db
 from .. import config
+from ..utils import get_now, to_iso
 
 logger = logging.getLogger(__name__)
-
-
-def get_local_time():
-    """Get current time in local timezone"""
-    return datetime.now().astimezone()
 
 
 def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
@@ -36,7 +31,7 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
             capture_count = cursor.fetchone()[0]
         
         # Generate filename and hierarchical path structure
-        now = get_local_time()
+        now = get_now()
         timestamp = now.strftime("%Y%m%d_%H%M%S")
         pattern = job['naming_pattern']
         
@@ -80,7 +75,7 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
                 cursor.execute("""
                     INSERT INTO captures (job_id, file_path, file_size, captured_at)
                     VALUES (?, ?, ?, ?)
-                """, (job['id'], output_path, file_size, get_local_time().isoformat()))
+                """, (job['id'], output_path, file_size, to_iso(get_now())))
                 
                 # Update job statistics and clear warning message
                 cursor.execute("""
@@ -90,7 +85,7 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
                         updated_at = ?,
                         warning_message = NULL
                     WHERE id = ?
-                """, (file_size, get_local_time().isoformat(), job['id']))
+                """, (file_size, to_iso(get_now()), job['id']))
             
             logger.info(f"Captured image for job '{job['name']}' (ID: {job['id']}): {filename}")
             return True, None

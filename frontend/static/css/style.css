@@ -573,6 +573,10 @@ body {
     overflow-y: auto;
 }
 
+#confirm-modal {
+    z-index: 1100;
+}
+
 .modal.active {
     display: flex;
     align-items: center;

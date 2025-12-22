@@ -290,6 +290,9 @@ async function showJobDetails(jobId) {
                     <button class="btn btn-primary" onclick="event.stopPropagation(); closeModal('job-details-modal'); showProcessVideoModal(${job.id}, '${escapeHtml(job.name)}')">
                         Build Timelapse
                     </button>
+                    <button class="btn btn-secondary" onclick="event.stopPropagation(); closeModal('job-details-modal'); startMaintenance(${job.id}, '${escapeHtml(job.name)}')">
+                        Maintenance
+                    </button>
                     ${job.status === 'active' ? 
                         `<button class="btn btn-secondary" onclick="updateJobStatus(${job.id}, 'disabled', '${escapeHtml(job.name)}'); closeModal('job-details-modal')">Disable</button>` :
                         job.status === 'disabled' ?
@@ -1176,3 +1179,238 @@ window.addEventListener('beforeunload', () => {
         videoRefreshInterval = null;
     }
 });
+
+// ===== Maintenance Functions =====
+
+let maintenanceData = null;
+
+async function startMaintenance(jobId, jobName) {
+    showConfirm(
+        `This will scan all captures for "${jobName}" to identify files that no longer exist on disk. The scan may take a moment depending on the number of captures. Continue?`,
+        async (confirmed) => {
+            if (confirmed) {
+                await performMaintenanceScan(jobId, jobName);
+            }
+        }
+    );
+}
+
+async function performMaintenanceScan(jobId, jobName) {
+    const modal = document.getElementById('maintenance-modal');
+    const title = document.getElementById('maintenance-title');
+    const content = document.getElementById('maintenance-content');
+    
+    // Update modal title with job name
+    title.textContent = `${jobName} - Maintenance`;
+    
+    // Show scanning message
+    content.innerHTML = `
+        <div style="text-align: center; padding: 2rem;">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">🔍</div>
+            <p>Scanning captures for "${escapeHtml(jobName)}"...</p>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                This may take a moment...
+            </p>
+        </div>
+    `;
+    modal.classList.add('active');
+    
+    try {
+        const response = await fetch(`${API_BASE}/jobs/${jobId}/maintenance/scan`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Scan failed');
+        }
+        
+        maintenanceData = await response.json();
+        displayMaintenanceResults(jobId, jobName);
+        
+    } catch (error) {
+        console.error('Maintenance scan failed:', error);
+        content.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">❌</div>
+                <p style="color: var(--danger);">Failed to scan captures</p>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                    ${escapeHtml(error.message)}
+                </p>
+                <button class="btn btn-secondary" style="margin-top: 1rem;" onclick="closeMaintenance()">Close</button>
+            </div>
+        `;
+    }
+}
+
+function displayMaintenanceResults(jobId, jobName) {
+    const content = document.getElementById('maintenance-content');
+    const data = maintenanceData;
+    
+    if (data.missing_count === 0) {
+        // No issues found
+        content.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">✅</div>
+                <h3 style="margin-bottom: 0.5rem;">All Files Present</h3>
+                <p style="color: var(--text-secondary);">
+                    All ${data.total_captures} captures have their files on disk.
+                </p>
+                <button class="btn btn-primary" style="margin-top: 1.5rem;" onclick="closeMaintenance()">Close</button>
+            </div>
+        `;
+    } else {
+        // Issues found - show details
+        const missingList = data.missing_files.map(file => `
+            <div style="padding: 0.4rem 0.5rem; background: white; border-radius: 3px; margin-bottom: 0.25rem; border-left: 2px solid var(--danger);">
+                <div style="font-size: 0.8rem; color: #000; word-break: break-all; font-family: monospace; line-height: 1.3;">
+                    ${escapeHtml(file.file_path)}
+                </div>
+                <div style="font-size: 0.7rem; color: #666; margin-top: 0.15rem; line-height: 1.2;">
+                    ${formatDateTime(file.captured_at)} • ${formatBytes(file.file_size)}
+                </div>
+            </div>
+        `).join('');
+        
+        content.innerHTML = `
+            <div>
+                <div style="text-align: center; margin-bottom: 1.5rem;">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⚠️</div>
+                    <h3 style="margin-bottom: 0.5rem;">Missing Files Detected</h3>
+                </div>
+                
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                        <div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary);">Total Captures</div>
+                            <div style="font-size: 1.5rem; font-weight: bold;">${data.total_captures}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary);">Missing Files</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--danger);">${data.missing_count}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary);">Existing Files</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success);">${data.existing_count}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary);">Size to Recover</div>
+                            <div style="font-size: 1.5rem; font-weight: bold;">${formatBytes(data.total_size_recovered)}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="margin-bottom: 0.5rem;">Missing Files (${data.missing_count}):</h4>
+                    <div style="max-height: 300px; overflow-y: auto; padding: 0.4rem; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+                        ${missingList}
+                    </div>
+                </div>
+                
+                <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                    <strong style="color: #856404;">⚠️ Important</strong>
+                    <p style="color: #856404; margin-top: 0.5rem; margin-bottom: 0; font-size: 0.875rem;">
+                        Before cleaning up, ensure these files are truly missing and not temporarily unavailable 
+                        (e.g., unmounted drive). This action will remove the database records for missing captures 
+                        and cannot be undone.
+                    </p>
+                </div>
+                
+                <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                    <button class="btn btn-secondary" onclick="closeMaintenance()">Cancel</button>
+                    <button class="btn btn-danger" onclick="confirmMaintenanceCleanup(${jobId}, '${escapeHtml(jobName)}')">
+                        Remove ${data.missing_count} Record${data.missing_count !== 1 ? 's' : ''}
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function confirmMaintenanceCleanup(jobId, jobName) {
+    showConfirm(
+        `Are you absolutely sure you want to remove ${maintenanceData.missing_count} database record(s) for missing files? This action cannot be undone.`,
+        async (confirmed) => {
+            if (confirmed) {
+                await performMaintenanceCleanup(jobId, jobName);
+            }
+        }
+    );
+}
+
+async function performMaintenanceCleanup(jobId, jobName) {
+    const content = document.getElementById('maintenance-content');
+    
+    // Show cleaning message
+    content.innerHTML = `
+        <div style="text-align: center; padding: 2rem;">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">🧹</div>
+            <p>Cleaning up database records...</p>
+        </div>
+    `;
+    
+    try {
+        const captureIds = maintenanceData.missing_files.map(f => f.id);
+        
+        const response = await fetch(`${API_BASE}/jobs/${jobId}/maintenance/cleanup`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                capture_ids: captureIds
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Cleanup failed');
+        }
+        
+        const result = await response.json();
+        
+        // Show success
+        content.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">✅</div>
+                <h3 style="margin-bottom: 0.5rem;">Cleanup Complete</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    Removed ${result.deleted_count} database record(s)
+                </p>
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; display: inline-block; text-align: left;">
+                    <div style="margin-bottom: 0.5rem;">
+                        <strong>Size recovered:</strong> ${formatBytes(result.size_recovered)}
+                    </div>
+                    <div style="margin-bottom: 0.5rem;">
+                        <strong>Remaining captures:</strong> ${result.new_capture_count}
+                    </div>
+                    <div>
+                        <strong>Current storage:</strong> ${formatBytes(result.new_storage_size)}
+                    </div>
+                </div>
+                <div style="margin-top: 1.5rem;">
+                    <button class="btn btn-primary" onclick="closeMaintenance(); loadJobs()">Close</button>
+                </div>
+            </div>
+        `;
+        
+        showNotification(`Successfully cleaned up ${result.deleted_count} missing file record(s)`, 'success');
+        
+    } catch (error) {
+        console.error('Maintenance cleanup failed:', error);
+        content.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">❌</div>
+                <p style="color: var(--danger);">Failed to cleanup records</p>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                    ${escapeHtml(error.message)}
+                </p>
+                <button class="btn btn-secondary" style="margin-top: 1rem;" onclick="closeMaintenance()">Close</button>
+            </div>
+        `;
+    }
+}
+
+function closeMaintenance() {
+    const modal = document.getElementById('maintenance-modal');
+    modal.classList.remove('active');
+    maintenanceData = null;
+}

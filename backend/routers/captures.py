@@ -9,6 +9,7 @@ import os
 
 from ..models import CaptureResponse
 from ..database import get_db, dict_from_row
+from ..utils import get_now, to_iso
 
 router = APIRouter()
 
@@ -79,7 +80,7 @@ async def delete_capture(capture_id: int):
                 storage_size = storage_size - ?,
                 updated_at = ?
             WHERE id = ?
-        """, (file_size, datetime.now().astimezone().isoformat(), job_id))
+        """, (file_size, to_iso(get_now()), job_id))
 
 
 @router.get("/job/{job_id}/count")
