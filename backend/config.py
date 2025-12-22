@@ -17,8 +17,7 @@ DEFAULT_CAPTURES_PATH = os.getenv("DEFAULT_CAPTURES_PATH", "/captures")
 DEFAULT_VIDEOS_PATH = os.getenv("DEFAULT_VIDEOS_PATH", "/timelapses")
 
 # Default naming patterns
-DEFAULT_CAPTURE_PATTERN = os.getenv("DEFAULT_CAPTURE_PATTERN", "{job_name}_capture{num:06d}_{timestamp}")
-DEFAULT_VIDEO_PATTERN = os.getenv("DEFAULT_VIDEO_PATTERN", "{job_name}_{created_timestamp}")
+DEFAULT_CAPTURE_PATTERN = os.getenv("DEFAULT_CAPTURE_PATTERN", "{job_name}_{num:06d}_{timestamp}")
 
 # Server settings
 HOST = os.getenv("HOST", "0.0.0.0")

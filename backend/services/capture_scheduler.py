@@ -63,10 +63,10 @@ class CaptureScheduler:
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # First, update any completed jobs
+            # First, update any completed jobs (including those with warnings)
             cursor.execute("""
                 UPDATE jobs 
-                SET status = 'completed', updated_at = ?
+                SET status = 'completed', warning_message = NULL, updated_at = ?
                 WHERE status = 'active'
                 AND end_datetime IS NOT NULL
                 AND datetime(end_datetime) < datetime(?)

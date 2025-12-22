@@ -1,9 +1,9 @@
 """
 Pydantic models for request/response validation
 """
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 
@@ -34,6 +34,25 @@ class JobCreate(BaseModel):
     framerate: int = Field(default=30, gt=0, le=120)
     capture_path: Optional[str] = None
     naming_pattern: Optional[str] = None
+    
+    @model_validator(mode='after')
+    def validate_dates(self):
+        if self.end_datetime:
+            # End date must be after start date
+            if self.end_datetime <= self.start_datetime:
+                raise ValueError("End date must be after start date")
+            
+            # End date must be at least start + interval
+            min_end = self.start_datetime + timedelta(seconds=self.interval_seconds)
+            if self.end_datetime < min_end:
+                raise ValueError(f"End date must be at least {self.interval_seconds} seconds after start date")
+            
+            # End date must be in the future
+            now = datetime.now()
+            if self.end_datetime < now:
+                raise ValueError("End date must be in the future")
+        
+        return self
 
 
 class JobUpdate(BaseModel):
@@ -111,14 +130,12 @@ class SettingsUpdate(BaseModel):
     default_captures_path: Optional[str] = None
     default_videos_path: Optional[str] = None
     default_capture_pattern: Optional[str] = None
-    default_video_pattern: Optional[str] = None
 
 
 class SettingsResponse(BaseModel):
     default_captures_path: str
     default_videos_path: str
     default_capture_pattern: str
-    default_video_pattern: str
 
 
 class TestUrlResponse(BaseModel):

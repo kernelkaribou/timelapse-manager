@@ -102,13 +102,11 @@ def init_db():
             VALUES 
                 ('default_captures_path', ?, ?),
                 ('default_videos_path', ?, ?),
-                ('default_capture_pattern', ?, ?),
-                ('default_video_pattern', ?, ?)
+                ('default_capture_pattern', ?, ?)
         """, (
             config.DEFAULT_CAPTURES_PATH, datetime.utcnow().isoformat(),
             config.DEFAULT_VIDEOS_PATH, datetime.utcnow().isoformat(),
-            config.DEFAULT_CAPTURE_PATTERN, datetime.utcnow().isoformat(),
-            config.DEFAULT_VIDEO_PATTERN, datetime.utcnow().isoformat()
+            config.DEFAULT_CAPTURE_PATTERN, datetime.utcnow().isoformat()
         ))
         
         # Create indexes

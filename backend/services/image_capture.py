@@ -35,10 +35,12 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         pattern = job['naming_pattern']
         
         # Replace placeholders in naming pattern
+        # Note: created_timestamp is for video patterns, not capture patterns
         filename = pattern.format(
             job_name=job['name'],
             num=capture_count + 1,
-            timestamp=timestamp
+            timestamp=timestamp,
+            created_timestamp=timestamp  # Fallback if pattern mistakenly uses this
         )
         filename += ".jpg"
         

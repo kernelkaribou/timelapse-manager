@@ -21,8 +21,7 @@ async def get_settings():
         return SettingsResponse(
             default_captures_path=settings.get("default_captures_path", "/captures"),
             default_videos_path=settings.get("default_videos_path", "/timelapses"),
-            default_capture_pattern=settings.get("default_capture_pattern", "{job_name}_capture{num:06d}_{timestamp}"),
-            default_video_pattern=settings.get("default_video_pattern", "{job_name}_{created_timestamp}")
+            default_capture_pattern=settings.get("default_capture_pattern", "{job_name}_{num:06d}_{timestamp}")
         )
 
 
@@ -50,12 +49,6 @@ async def update_settings(settings_update: SettingsUpdate):
                 INSERT OR REPLACE INTO settings (key, value, updated_at)
                 VALUES ('default_capture_pattern', ?, ?)
             """, (settings_update.default_capture_pattern, now))
-        
-        if settings_update.default_video_pattern is not None:
-            cursor.execute("""
-                INSERT OR REPLACE INTO settings (key, value, updated_at)
-                VALUES ('default_video_pattern', ?, ?)
-            """, (settings_update.default_video_pattern, now))
         
         # Return updated settings
         return await get_settings()

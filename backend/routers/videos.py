@@ -32,12 +32,9 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
         cursor.execute("SELECT value FROM settings WHERE key = 'default_videos_path'")
         videos_path = cursor.fetchone()[0]
         
-        # Create video record
+        # Create video record - name already includes timestamp from frontend
         now = datetime.utcnow().isoformat()
-        output_path = os.path.join(
-            videos_path,
-            f"{video.name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.mp4"
-        )
+        output_path = os.path.join(videos_path, f"{video.name}.mp4")
         
         cursor.execute("""
             INSERT INTO processed_videos (

@@ -31,6 +31,25 @@ async def create_job(job: JobCreate):
             cursor.execute("SELECT value FROM settings WHERE key = 'default_capture_pattern'")
             job.naming_pattern = cursor.fetchone()[0]
         
+        # Validate capture_path exists and is writable
+        if not os.path.exists(job.capture_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Capture path does not exist: {job.capture_path}"
+            )
+        
+        if not os.path.isdir(job.capture_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Capture path is not a directory: {job.capture_path}"
+            )
+        
+        if not os.access(job.capture_path, os.W_OK):
+            raise HTTPException(
+                status_code=400,
+                detail=f"No write permission for capture path: {job.capture_path}"
+            )
+        
         now = datetime.utcnow().isoformat()
         
         # Insert job first to get the ID
@@ -53,7 +72,22 @@ async def create_job(job: JobCreate):
         
         # Create job directory with ID prefix
         job_dir = os.path.join(job.capture_path, f"{job_id}_{job.name}")
-        os.makedirs(job_dir, exist_ok=True)
+        try:
+            os.makedirs(job_dir, exist_ok=True)
+        except PermissionError:
+            # Rollback the job creation
+            cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Permission denied creating job directory: {job_dir}"
+            )
+        except Exception as e:
+            # Rollback the job creation
+            cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to create job directory: {str(e)}"
+            )
         
         # Update the capture_path with the actual directory
         cursor.execute("UPDATE jobs SET capture_path = ? WHERE id = ?", (job_dir, job_id))

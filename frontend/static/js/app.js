@@ -73,6 +73,17 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshIntervals.push(setInterval(loadJobs, 10000)); // Refresh jobs every 10s
     refreshIntervals.push(setInterval(loadVideos, 5000)); // Refresh videos every 5s
     
+    // Setup event listeners for job creation form
+    const startInput = document.getElementById('start_datetime');
+    const intervalInput = document.getElementById('interval_seconds');
+    
+    if (startInput) {
+        startInput.addEventListener('change', updateEndDateMin);
+    }
+    if (intervalInput) {
+        intervalInput.addEventListener('change', updateEndDateMin);
+    }
+    
     // Setup range checkbox
     document.getElementById('use_range').addEventListener('change', (e) => {
         const captureRange = document.getElementById('capture-range');
@@ -182,9 +193,10 @@ function renderJobs(jobs) {
                 </span>
             </div>
             <div class="job-info">
-                <div><strong>Stream:</strong> <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 250px; vertical-align: bottom;">${escapeHtml(getStreamHost(job.url))}</span></div>
+                <div><strong>Stream URL:</strong> <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 250px; vertical-align: bottom;">${escapeHtml(getStreamHost(job.url))}</span></div>
                 <div><strong>Interval:</strong> ${job.interval_seconds}s</div>
-                ${job.end_datetime ? `<div><strong>Ends:</strong> ${formatDateTime(job.end_datetime)}</div>` : '<div><strong>Ongoing capture</strong></div>'}
+                ${job.start_datetime ? `<div><strong>Start:</strong> ${formatDateTime(job.start_datetime)}</div>` : ''}
+                ${job.end_datetime ? `<div><strong>End:</strong> ${formatDateTime(job.end_datetime)}</div>` : '<div><strong>Ongoing capture</strong></div>'}
                 <div style="margin-top: 0.5rem;">
                     <span class="stat-inline">${job.capture_count} captures</span> · 
                     <span class="stat-inline">${formatBytes(job.storage_size)}</span>
@@ -303,13 +315,41 @@ async function createJob(event) {
     // Auto-detect stream type from URL
     const stream_type = url.toLowerCase().startsWith('rtsp://') ? 'rtsp' : 'http';
     
+    const startDatetime = document.getElementById('start_datetime').value;
+    const endDatetime = document.getElementById('end_datetime').value || null;
+    const intervalSeconds = parseInt(document.getElementById('interval_seconds').value);
+    
+    // Validate dates
+    const startDate = new Date(startDatetime);
+    
+    if (endDatetime) {
+        const endDate = new Date(endDatetime);
+        const now = new Date();
+        
+        if (endDate <= startDate) {
+            showNotification('End date must be after start date', 'error');
+            return;
+        }
+        
+        if (endDate < now) {
+            showNotification('End date cannot be in the past', 'error');
+            return;
+        }
+        
+        const minEnd = new Date(startDate.getTime() + intervalSeconds * 1000);
+        if (endDate < minEnd) {
+            showNotification(`End date must be at least ${intervalSeconds} seconds after start date`, 'error');
+            return;
+        }
+    }
+    
     const formData = {
         name: document.getElementById('job_name').value,
         url: url,
         stream_type: stream_type,
-        start_datetime: document.getElementById('start_datetime').value,
-        end_datetime: document.getElementById('end_datetime').value || null,
-        interval_seconds: parseInt(document.getElementById('interval_seconds').value),
+        start_datetime: startDatetime,
+        end_datetime: endDatetime,
+        interval_seconds: intervalSeconds,
         framerate: parseInt(document.getElementById('framerate').value),
         capture_path: document.getElementById('capture_path').value || null,
         naming_pattern: document.getElementById('naming_pattern').value || null
@@ -588,9 +628,18 @@ async function showProcessVideoModal(jobId, jobName) {
         const captureCount = timeRange.count;
         console.log(`Job ${jobId} (${jobName}): Found ${captureCount} captures`);
         
+        // Generate timestamp in the same format as backend (YYYYMMDD_HHMMSS)
+        const now = new Date();
+        const timestamp = now.getFullYear() +
+            String(now.getMonth() + 1).padStart(2, '0') +
+            String(now.getDate()).padStart(2, '0') + '_' +
+            String(now.getHours()).padStart(2, '0') +
+            String(now.getMinutes()).padStart(2, '0') +
+            String(now.getSeconds()).padStart(2, '0');
+        
         // Set values
         document.getElementById('process_job_id').value = jobId;
-        document.getElementById('video_name').value = `${jobName}_timelapse`;
+        document.getElementById('video_name').value = `${jobName}_${timestamp}`;
         document.getElementById('video_framerate').value = job.framerate;
         
         // Update modal title
@@ -801,7 +850,6 @@ async function loadSettings() {
         document.getElementById('default_captures_path').value = settings.default_captures_path;
         document.getElementById('default_videos_path').value = settings.default_videos_path;
         document.getElementById('default_capture_pattern').value = settings.default_capture_pattern;
-        document.getElementById('default_video_pattern').value = settings.default_video_pattern;
     } catch (error) {
         console.error('Failed to load settings:', error);
     }
@@ -813,8 +861,7 @@ async function saveSettings(event) {
     const formData = {
         default_captures_path: document.getElementById('default_captures_path').value,
         default_videos_path: document.getElementById('default_videos_path').value,
-        default_capture_pattern: document.getElementById('default_capture_pattern').value,
-        default_video_pattern: document.getElementById('default_video_pattern').value
+        default_capture_pattern: document.getElementById('default_capture_pattern').value
     };
     
     try {
@@ -855,7 +902,19 @@ function showCreateJobModal() {
     // Set default start time to now
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    document.getElementById('start_datetime').value = now.toISOString().slice(0, 16);
+    const nowString = now.toISOString().slice(0, 16);
+    
+    const startInput = document.getElementById('start_datetime');
+    const endInput = document.getElementById('end_datetime');
+    const intervalInput = document.getElementById('interval_seconds');
+    
+    startInput.value = nowString;
+    // Don't set min on start date - allow past dates
+    
+    endInput.value = '';
+    
+    // Set initial min for end date
+    updateEndDateMin();
     
     showModal('create-job-modal');
     
@@ -863,6 +922,21 @@ function showCreateJobModal() {
     setTimeout(() => {
         updateDurationEstimate();
     }, 100);
+}
+
+// Update minimum end date based on start date and interval
+function updateEndDateMin() {
+    const startInput = document.getElementById('start_datetime');
+    const endInput = document.getElementById('end_datetime');
+    const intervalInput = document.getElementById('interval_seconds');
+    
+    if (startInput && startInput.value && intervalInput) {
+        const intervalSeconds = parseInt(intervalInput.value) || 60;
+        const startDate = new Date(startInput.value);
+        const minEndDate = new Date(startDate.getTime() + intervalSeconds * 1000);
+        minEndDate.setMinutes(minEndDate.getMinutes() - minEndDate.getTimezoneOffset());
+        endInput.min = minEndDate.toISOString().slice(0, 16);
+    }
 }
 
 // Utility functions
