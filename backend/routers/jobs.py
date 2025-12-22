@@ -7,15 +7,41 @@ from datetime import datetime
 import os
 import logging
 
-from ..models import JobCreate, JobUpdate, JobResponse, TestUrlResponse, DurationEstimate, DurationCalculation, MaintenanceResult, MaintenanceCleanup
+from ..models import JobCreate, JobUpdate, JobResponse, TestUrlResponse, DurationEstimate, DurationCalculation, MaintenanceResult, MaintenanceCleanup, MaintenanceImport
 from ..database import get_db, dict_from_row
 from ..services.url_tester import test_stream_url
 from ..services.duration_calculator import calculate_duration
-from ..services.maintenance import scan_job_files, cleanup_missing_captures
+from ..services.maintenance import scan_job_files, cleanup_missing_captures, import_orphaned_files
+from ..services.time_window import calculate_next_capture_time, should_job_capture_now, ensure_timezone_aware
 from ..utils import get_now, to_iso
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def enrich_job_with_next_capture(job_dict: dict) -> dict:
+    """Add next_capture_at field to job dict"""
+    # Get last capture for this job to calculate next capture time
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT captured_at FROM captures
+            WHERE job_id = ?
+            ORDER BY captured_at DESC
+            LIMIT 1
+        """, (job_dict['id'],))
+        row = cursor.fetchone()
+        
+        last_capture_time = None
+        if row:
+            from ..utils import parse_iso
+            last_capture_time = parse_iso(row[0])
+        
+        next_capture = calculate_next_capture_time(job_dict, last_capture_time)
+        job_dict['next_capture_at'] = to_iso(next_capture) if next_capture else None
+        
+        return job_dict
+
 
 
 @router.post("/", response_model=JobResponse, status_code=201)
@@ -58,14 +84,18 @@ async def create_job(job: JobCreate):
             INSERT INTO jobs (
                 name, url, stream_type, start_datetime, end_datetime,
                 interval_seconds, framerate, capture_path, naming_pattern,
+                time_window_enabled, time_window_start, time_window_end,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             job.name, job.url, job.stream_type.value,
             to_iso(job.start_datetime),
             to_iso(job.end_datetime) if job.end_datetime else None,
             job.interval_seconds, job.framerate, "",  # Will update capture_path next
             job.naming_pattern,
+            1 if job.time_window_enabled else 0,
+            job.time_window_start if job.time_window_enabled else None,
+            job.time_window_end if job.time_window_enabled else None,
             now, now
         ))
         
@@ -94,8 +124,22 @@ async def create_job(job: JobCreate):
         cursor.execute("UPDATE jobs SET capture_path = ? WHERE id = ?", (job_dir, job_id))
         cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         
+        job_dict = dict_from_row(cursor.fetchone())
+        
+        # Calculate correct initial status based on time window
+        should_capture, reason = should_job_capture_now(job_dict)
+        correct_status = 'active' if should_capture else 'sleeping'
+        
+        # Update status if it should be sleeping
+        if correct_status != job_dict['status']:
+            cursor.execute("UPDATE jobs SET status = ? WHERE id = ?", (correct_status, job_id))
+            cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+            job_dict = dict_from_row(cursor.fetchone())
+            logger.info(f"Job {job_id} initial status set to {correct_status} (reason: {reason})")
+        
         logger.info(f"Created job '{job.name}' (ID: {job_id}) - Interval: {job.interval_seconds}s, Stream: {job.stream_type.value}")
-        return dict_from_row(cursor.fetchone())
+        return enrich_job_with_next_capture(job_dict)
+
 
 
 @router.get("/", response_model=List[JobResponse])
@@ -119,7 +163,8 @@ async def list_jobs(
                 (limit, offset)
             )
         
-        return [dict_from_row(row) for row in cursor.fetchall()]
+        jobs = [dict_from_row(row) for row in cursor.fetchall()]
+        return [enrich_job_with_next_capture(job) for job in jobs]
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -133,7 +178,8 @@ async def get_job(job_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        return dict_from_row(row)
+        return enrich_job_with_next_capture(dict_from_row(row))
+
 
 
 @router.patch("/{job_id}", response_model=JobResponse)
@@ -175,24 +221,32 @@ async def update_job(job_id: int, job_update: JobUpdate):
             end_time = job_update.end_datetime
             
             if end_time is not None:
+                # Ensure timezone awareness for comparison
+                end_time = ensure_timezone_aware(end_time)
                 now = get_now()
                 
-                # Check if end time is in the past
-                if end_time <= now:
-                    raise HTTPException(status_code=400, detail="End time must be in the future")
+                # Only validate future end time if not explicitly completing the job
+                # Allow end_datetime to be now or past when status is being set to completed
+                is_completing = job_update.status is not None and job_update.status.value == 'completed'
                 
-                # Check if end time is at least one interval in the future
-                min_end_time = now.timestamp() + current_job['interval_seconds']
-                if end_time.timestamp() < min_end_time:
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"End time must be at least {current_job['interval_seconds']} seconds in the future"
-                    )
+                if not is_completing:
+                    # Check if end time is in the past
+                    if end_time <= now:
+                        raise HTTPException(status_code=400, detail="End time must be in the future")
+                    
+                    # Check if end time is at least one interval in the future
+                    min_end_time = now.timestamp() + current_job['interval_seconds']
+                    if end_time.timestamp() < min_end_time:
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"End time must be at least {current_job['interval_seconds']} seconds in the future"
+                        )
                 
                 # If job is completed and end time is being extended, reactivate the job
-                if current_job['status'] == 'completed':
+                # Status will be recalculated after all updates to consider time windows
+                if current_job['status'] == 'completed' and not is_completing:
                     updates.append("status = ?")
-                    values.append('active')
+                    values.append('active')  # Will be adjusted for time windows later
             
             # Add to updates (can be None for ongoing jobs)
             updates.append("end_datetime = ?")
@@ -210,6 +264,19 @@ async def update_job(job_id: int, job_update: JobUpdate):
             updates.append("status = ?")
             values.append(job_update.status.value)
         
+        # Handle time window updates
+        if job_update.time_window_enabled is not None:
+            updates.append("time_window_enabled = ?")
+            values.append(1 if job_update.time_window_enabled else 0)
+        
+        if job_update.time_window_start is not None:
+            updates.append("time_window_start = ?")
+            values.append(job_update.time_window_start)
+        
+        if job_update.time_window_end is not None:
+            updates.append("time_window_end = ?")
+            values.append(job_update.time_window_end)
+        
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")
         
@@ -224,12 +291,25 @@ async def update_job(job_id: int, job_update: JobUpdate):
         cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         updated_job = dict_from_row(cursor.fetchone())
         
+        # Always recalculate status for active/sleeping jobs after any update
+        # This ensures the job is in the correct state based on time window
+        if updated_job['status'] in ('active', 'sleeping'):
+            should_capture, reason = should_job_capture_now(updated_job)
+            correct_status = 'active' if should_capture else 'sleeping'
+            
+            # Update status if it doesn't match what it should be
+            if correct_status != updated_job['status']:
+                cursor.execute("UPDATE jobs SET status = ? WHERE id = ?", (correct_status, job_id))
+                cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+                updated_job = dict_from_row(cursor.fetchone())
+                logger.info(f"Job {job_id} status corrected to {correct_status} based on current time window (reason: {reason})")
+        
         # Log changes
         changes = [f"{field}" for field in job_update.model_fields_set]
         if changes:
             logger.info(f"Updated job '{current_job['name']}' (ID: {job_id}) - Changed: {', '.join(changes)}")
         
-        return updated_job
+        return enrich_job_with_next_capture(updated_job)
 
 
 @router.delete("/{job_id}", status_code=204)
@@ -346,4 +426,25 @@ async def cleanup_job_maintenance(job_id: int, cleanup: MaintenanceCleanup):
     except Exception as e:
         logger.error(f"Error during maintenance cleanup for job {job_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Maintenance cleanup failed: {str(e)}")
+
+
+@router.post("/{job_id}/maintenance/import")
+async def import_job_maintenance(job_id: int, import_data: MaintenanceImport):
+    """
+    Import orphaned files found on disk into the database.
+    This endpoint should be called after scan to add missing capture records.
+    """
+    try:
+        if not import_data.orphaned_files:
+            raise HTTPException(status_code=400, detail="No orphaned files provided")
+        
+        result = import_orphaned_files(job_id, import_data.orphaned_files)
+        logger.info(f"Maintenance import completed for job {job_id}: "
+                   f"{result['imported_count']} files imported")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during maintenance import for job {job_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Maintenance import failed: {str(e)}")
 

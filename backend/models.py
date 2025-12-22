@@ -14,7 +14,9 @@ class StreamType(str, Enum):
 
 class JobStatus(str, Enum):
     ACTIVE = "active"
+    SLEEPING = "sleeping"  # Active but outside time window
     DISABLED = "disabled"
+    COMPLETED = "completed"
     ARCHIVED = "archived"
 
 
@@ -34,6 +36,9 @@ class JobCreate(BaseModel):
     framerate: int = Field(default=30, gt=0, le=120)
     capture_path: Optional[str] = None
     naming_pattern: Optional[str] = None
+    time_window_enabled: bool = Field(default=False, description="Enable daily time window for captures")
+    time_window_start: Optional[str] = Field(None, description="Start time in HH:MM format (e.g., '08:00')")
+    time_window_end: Optional[str] = Field(None, description="End time in HH:MM format (e.g., '20:00')")
     
     @model_validator(mode='after')
     def validate_dates(self):
@@ -52,6 +57,19 @@ class JobCreate(BaseModel):
             if self.end_datetime < now:
                 raise ValueError("End date must be in the future")
         
+        # Validate time window
+        if self.time_window_enabled:
+            if not self.time_window_start or not self.time_window_end:
+                raise ValueError("Time window start and end times are required when time window is enabled")
+            
+            # Validate time format (HH:MM)
+            import re
+            time_pattern = re.compile(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$')
+            if not time_pattern.match(self.time_window_start):
+                raise ValueError("Time window start must be in HH:MM format (e.g., '08:00')")
+            if not time_pattern.match(self.time_window_end):
+                raise ValueError("Time window end must be in HH:MM format (e.g., '20:00')")
+        
         return self
 
 
@@ -64,6 +82,9 @@ class JobUpdate(BaseModel):
     interval_seconds: Optional[int] = Field(None, ge=10)
     framerate: Optional[int] = Field(None, gt=0, le=120)
     status: Optional[JobStatus] = None
+    time_window_enabled: Optional[bool] = None
+    time_window_start: Optional[str] = None
+    time_window_end: Optional[str] = None
 
 
 class JobResponse(BaseModel):
@@ -81,6 +102,10 @@ class JobResponse(BaseModel):
     capture_count: int
     warning_message: Optional[str] = None
     storage_size: int
+    time_window_enabled: int = 0  # SQLite returns as int
+    time_window_start: Optional[str] = None
+    time_window_end: Optional[str] = None
+    next_capture_at: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -152,9 +177,15 @@ class MaintenanceResult(BaseModel):
     total_captures: int
     missing_files: List[Dict[str, Any]]
     missing_count: int
+    orphaned_files: List[Dict[str, Any]]
+    orphaned_count: int
     existing_count: int
     total_size_recovered: int
 
 
 class MaintenanceCleanup(BaseModel):
     capture_ids: List[int]
+
+
+class MaintenanceImport(BaseModel):
+    orphaned_files: List[Dict[str, Any]]

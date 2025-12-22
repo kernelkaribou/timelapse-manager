@@ -3,22 +3,75 @@ Maintenance service for checking and cleaning up job files
 """
 import os
 import logging
+import re
+from datetime import datetime
 from typing import Dict, List, Any
+from PIL import Image
 from ..database import get_db, dict_from_row
 from ..utils import get_now, to_iso
+from .time_window import ensure_timezone_aware
 
 logger = logging.getLogger(__name__)
 
 
+def extract_timestamp_from_file(file_path: str) -> datetime:
+    """
+    Extract timestamp from image file using multiple methods
+    
+    Priority order:
+    1. Filename pattern (YYYYMMDD_HHMMSS)
+    2. EXIF DateTimeOriginal
+    3. File modification time
+    
+    Returns timezone-aware datetime in local timezone
+    """
+    # Try to extract from filename first
+    filename = os.path.basename(file_path)
+    # Pattern: YYYYMMDD_HHMMSS anywhere in filename
+    timestamp_pattern = r'(\d{8})_(\d{6})'
+    match = re.search(timestamp_pattern, filename)
+    
+    if match:
+        date_str = match.group(1)  # YYYYMMDD
+        time_str = match.group(2)  # HHMMSS
+        try:
+            # Parse as naive datetime, then make timezone-aware
+            dt = datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
+            return ensure_timezone_aware(dt)
+        except ValueError:
+            logger.warning(f"Failed to parse timestamp from filename: {filename}")
+    
+    # Try EXIF data
+    try:
+        with Image.open(file_path) as img:
+            exif = img.getexif()
+            if exif:
+                # EXIF tag 36867 is DateTimeOriginal
+                date_taken = exif.get(36867)
+                if date_taken:
+                    # EXIF format: "YYYY:MM:DD HH:MM:SS"
+                    dt = datetime.strptime(date_taken, "%Y:%m:%d %H:%M:%S")
+                    return ensure_timezone_aware(dt)
+    except Exception as e:
+        logger.debug(f"Could not read EXIF from {file_path}: {e}")
+    
+    # Fall back to file modification time
+    mtime = os.path.getmtime(file_path)
+    dt = datetime.fromtimestamp(mtime)
+    return ensure_timezone_aware(dt)
+
+
 def scan_job_files(job_id: int) -> Dict[str, Any]:
     """
-    Scan all captures for a job and identify missing files
+    Scan all captures for a job and identify:
+    1. Missing files (in DB but not on disk)
+    2. Orphaned files (on disk but not in DB)
     
     Args:
         job_id: The ID of the job to scan
         
     Returns:
-        Dictionary containing scan results with missing and existing file counts
+        Dictionary containing scan results with missing, orphaned, and existing file counts
     """
     with get_db() as conn:
         cursor = conn.cursor()
@@ -31,8 +84,9 @@ def scan_job_files(job_id: int) -> Dict[str, Any]:
             raise ValueError(f"Job {job_id} not found")
         
         job = dict_from_row(job_row)
+        capture_path = job['capture_path']
         
-        # Get all captures for this job
+        # Get all captures for this job from database
         cursor.execute("""
             SELECT id, file_path, file_size, captured_at 
             FROM captures 
@@ -42,6 +96,8 @@ def scan_job_files(job_id: int) -> Dict[str, Any]:
         
         captures = cursor.fetchall()
         
+        # Build a set of known file paths for quick lookup
+        known_files = set()
         missing_files = []
         existing_count = 0
         total_size_recovered = 0
@@ -49,6 +105,7 @@ def scan_job_files(job_id: int) -> Dict[str, Any]:
         for capture in captures:
             capture_dict = dict_from_row(capture)
             file_path = capture_dict['file_path']
+            known_files.add(file_path)
             
             if not os.path.exists(file_path):
                 missing_files.append({
@@ -61,18 +118,44 @@ def scan_job_files(job_id: int) -> Dict[str, Any]:
             else:
                 existing_count += 1
         
+        # Now scan the file system for orphaned files
+        orphaned_files = []
+        if os.path.exists(capture_path):
+            for root, dirs, files in os.walk(capture_path):
+                for filename in files:
+                    # Only consider image files
+                    if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        full_path = os.path.join(root, filename)
+                        
+                        # If this file is not in our database, it's orphaned
+                        if full_path not in known_files:
+                            try:
+                                file_size = os.path.getsize(full_path)
+                                timestamp = extract_timestamp_from_file(full_path)
+                                
+                                orphaned_files.append({
+                                    'file_path': full_path,
+                                    'file_size': file_size,
+                                    'captured_at': to_iso(timestamp)
+                                })
+                            except Exception as e:
+                                logger.warning(f"Could not process orphaned file {full_path}: {e}")
+        
         result = {
             'job_id': job_id,
             'job_name': job['name'],
             'total_captures': len(captures),
             'missing_files': missing_files,
             'missing_count': len(missing_files),
+            'orphaned_files': orphaned_files,
+            'orphaned_count': len(orphaned_files),
             'existing_count': existing_count,
             'total_size_recovered': total_size_recovered
         }
         
         logger.info(f"Maintenance scan for job {job_id} ({job['name']}): "
-                   f"{existing_count} existing, {len(missing_files)} missing files")
+                   f"{existing_count} existing, {len(missing_files)} missing, "
+                   f"{len(orphaned_files)} orphaned files")
         
         return result
 
@@ -147,6 +230,75 @@ def cleanup_missing_captures(job_id: int, capture_ids: List[int]) -> Dict[str, A
         return {
             'deleted_count': deleted_count,
             'size_recovered': total_size,
+            'new_capture_count': new_count,
+            'new_storage_size': new_size
+        }
+
+
+def import_orphaned_files(job_id: int, orphaned_files: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Import orphaned files found on disk into the database
+    
+    Args:
+        job_id: The ID of the job
+        orphaned_files: List of orphaned file dictionaries with file_path, file_size, captured_at
+        
+    Returns:
+        Dictionary containing import results
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Verify job exists
+        cursor.execute("SELECT id FROM jobs WHERE id = ?", (job_id,))
+        if not cursor.fetchone():
+            raise ValueError(f"Job {job_id} not found")
+        
+        imported_count = 0
+        total_size = 0
+        
+        for file_info in orphaned_files:
+            try:
+                # Verify file still exists
+                if not os.path.exists(file_info['file_path']):
+                    logger.warning(f"Orphaned file no longer exists: {file_info['file_path']}")
+                    continue
+                
+                # Insert capture record
+                cursor.execute("""
+                    INSERT INTO captures (job_id, file_path, file_size, captured_at)
+                    VALUES (?, ?, ?, ?)
+                """, (job_id, file_info['file_path'], file_info['file_size'], file_info['captured_at']))
+                
+                imported_count += 1
+                total_size += file_info['file_size']
+                
+            except Exception as e:
+                logger.error(f"Failed to import {file_info['file_path']}: {e}")
+        
+        # Update job statistics
+        cursor.execute("""
+            SELECT COUNT(*) as count, COALESCE(SUM(file_size), 0) as total_size
+            FROM captures
+            WHERE job_id = ?
+        """, (job_id,))
+        
+        stats = cursor.fetchone()
+        new_count = stats[0]
+        new_size = stats[1]
+        
+        cursor.execute("""
+            UPDATE jobs 
+            SET capture_count = ?, storage_size = ?, updated_at = ?
+            WHERE id = ?
+        """, (new_count, new_size, to_iso(get_now()), job_id))
+        
+        logger.info(f"Imported {imported_count} orphaned files for job {job_id}, "
+                   f"added {total_size} bytes to database")
+        
+        return {
+            'imported_count': imported_count,
+            'total_size_imported': total_size,
             'new_capture_count': new_count,
             'new_storage_size': new_size
         }

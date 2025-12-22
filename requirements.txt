@@ -22,6 +22,8 @@ httptools==0.7.1
     # via uvicorn
 idna==3.11
     # via anyio
+pillow==11.1.0
+    # via -r requirements.in
 pydantic==2.12.5
     # via
     #   -r requirements.in

@@ -9,6 +9,7 @@ import logging
 from ..database import get_db, dict_from_row
 from ..utils import get_now, to_iso, parse_iso
 from .image_capture import capture_image
+from .time_window import should_job_capture_now, calculate_next_capture_time
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class CaptureScheduler:
             cursor.execute("""
                 UPDATE jobs 
                 SET status = 'completed', warning_message = NULL, updated_at = ?
-                WHERE status = 'active'
+                WHERE status IN ('active', 'sleeping')
                 AND end_datetime IS NOT NULL
                 AND datetime(end_datetime) < datetime(?)
             """, (to_iso(now), to_iso(now)))
@@ -75,20 +76,51 @@ class CaptureScheduler:
             if cursor.rowcount > 0:
                 logger.info(f"Updated {cursor.rowcount} job(s) to completed status")
             
-            # Now get active jobs for capture
+            # Get active and sleeping jobs for status check
             cursor.execute("""
                 SELECT * FROM jobs
-                WHERE status = 'active'
+                WHERE status IN ('active', 'sleeping')
                 AND datetime(start_datetime) <= datetime(?)
                 AND (end_datetime IS NULL OR datetime(end_datetime) >= datetime(?))
             """, (to_iso(now), to_iso(now)))
             
             active_jobs = [dict_from_row(row) for row in cursor.fetchall()]
         
-        logger.debug(f"Check at {to_iso(now)}: Found {len(active_jobs)} active jobs")
+        logger.debug(f"Check at {to_iso(now)}: Found {len(active_jobs)} active/sleeping jobs")
         
         for job in active_jobs:
             job_id = job['id']
+            
+            # Check if job should capture now based on time window
+            should_capture_window, reason = should_job_capture_now(job, now)
+            
+            # Update job status based on time window
+            if not should_capture_window and reason == 'outside_window':
+                # Job is outside its time window, set to sleeping
+                if job['status'] != 'sleeping':
+                    with get_db() as conn:
+                        cursor = conn.cursor()
+                        # Clear warning message when going to sleep - warnings only apply to active jobs
+                        cursor.execute(
+                            "UPDATE jobs SET status = 'sleeping', warning_message = NULL, updated_at = ? WHERE id = ?",
+                            (to_iso(now), job_id)
+                        )
+                    logger.info(f"Job {job_id} ({job['name']}) is now sleeping (outside time window)")
+                continue  # Skip capture check for this job
+            elif should_capture_window and job['status'] == 'sleeping':
+                # Job is back in its time window, reactivate
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE jobs SET status = 'active', updated_at = ? WHERE id = ?",
+                        (to_iso(now), job_id)
+                    )
+                logger.info(f"Job {job_id} ({job['name']}) is now active (entered time window)")
+            
+            # Only proceed with capture check if job should capture now
+            if not should_capture_window:
+                continue
+            
             last_capture_ts = self.last_capture_times.get(job_id)
             
             # Check if it's time to capture

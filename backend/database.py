@@ -98,6 +98,14 @@ def init_db():
         if 'warning_message' not in columns:
             cursor.execute("ALTER TABLE jobs ADD COLUMN warning_message TEXT")
         
+        # Migration: Add time window columns if they don't exist
+        if 'time_window_enabled' not in columns:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN time_window_enabled INTEGER DEFAULT 0")
+        if 'time_window_start' not in columns:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN time_window_start TEXT")
+        if 'time_window_end' not in columns:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN time_window_end TEXT")
+        
         # Migration: Add start_time and end_time columns to processed_videos if they don't exist
         cursor.execute("PRAGMA table_info(processed_videos)")
         video_columns = [col[1] for col in cursor.fetchall()]
