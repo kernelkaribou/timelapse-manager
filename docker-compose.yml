@@ -9,13 +9,10 @@ services:
       - PUID=1000 
       - PGID=1000
       # Recommended: Set timezone, Defaults to UTC, otherwise you will have a bad time if not in UTC
-      - TZ=Etc/UTC
+      - TZ=America/Chicago
       # Optional environment variables:
-      # - LOG_LEVEL=INFO # Logging level: DEBUG, INFO, WARNING, ERROR. Default: INFO
+      - LOG_LEVEL=DEBUG # Logging level: DEBUG, INFO, WARNING, ERROR. Default: INFO
       # - PORT=8080 # Set custom port
-      # - DATABASE_PATH=/app/data/timelapse-manager.db # Set custom database path
-      # - DEFAULT_CAPTURES_PATH=/captures # Set custom captures path
-      # - DEFAULT_VIDEOS_PATH=/timelapses # Set custom videos path
       # - FFMPEG_TIMEOUT=10 # Set custom ffmpeg timeout in seconds
     ports:
       - "8080:8080"

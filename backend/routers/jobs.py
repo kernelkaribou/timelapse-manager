@@ -22,14 +22,13 @@ async def create_job(job: JobCreate):
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Get default settings if not provided
+        # Get default values from config if not provided
+        from .. import config
         if not job.capture_path:
-            cursor.execute("SELECT value FROM settings WHERE key = 'default_captures_path'")
-            job.capture_path = cursor.fetchone()[0]
+            job.capture_path = config.DEFAULT_CAPTURES_PATH
         
         if not job.naming_pattern:
-            cursor.execute("SELECT value FROM settings WHERE key = 'default_capture_pattern'")
-            job.naming_pattern = cursor.fetchone()[0]
+            job.naming_pattern = config.DEFAULT_CAPTURE_PATTERN
         
         # Validate capture_path exists and is writable
         if not os.path.exists(job.capture_path):

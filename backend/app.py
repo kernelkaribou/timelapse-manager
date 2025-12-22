@@ -11,7 +11,7 @@ import logging
 import sys
 
 from .database import init_db
-from .routers import jobs, captures, videos, settings
+from .routers import jobs, captures, videos
 from .services.capture_scheduler import CaptureScheduler
 from . import config
 
@@ -36,11 +36,11 @@ class AccessLogFilter(logging.Filter):
                 '/api/jobs',
                 '/api/videos',
                 '/api/captures',
-                '/api/settings'
+
             ]):
                 return False
             # Suppress static file requests, root path, and health checks
-            if '"GET /static/' in message or '"GET /captures/' in message or '"GET /videos/' in message or '"GET / HTTP' in message or '"GET /health' in message:
+            if '"GET /static/' in message or '"GET / HTTP' in message or '"GET /health' in message:
                 return False
         return True
 
@@ -93,16 +93,9 @@ app.add_middleware(
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(captures.router, prefix="/api/captures", tags=["captures"])
 app.include_router(videos.router, prefix="/api/videos", tags=["videos"])
-app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
 # Serve static files for frontend
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
-
-# Serve capture images
-app.mount("/captures", StaticFiles(directory="/captures"), name="captures")
-
-# Serve video files
-app.mount("/videos", StaticFiles(directory="/timelapses"), name="videos")
 
 
 @app.get("/")

@@ -87,28 +87,6 @@ def init_db():
             )
         """)
         
-        # Settings table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        
-        # Insert default settings if not exists
-        cursor.execute("""
-            INSERT OR IGNORE INTO settings (key, value, updated_at)
-            VALUES 
-                ('default_captures_path', ?, ?),
-                ('default_videos_path', ?, ?),
-                ('default_capture_pattern', ?, ?)
-        """, (
-            config.DEFAULT_CAPTURES_PATH, datetime.now().astimezone().isoformat(),
-            config.DEFAULT_VIDEOS_PATH, datetime.now().astimezone().isoformat(),
-            config.DEFAULT_CAPTURE_PATTERN, datetime.now().astimezone().isoformat()
-        ))
-        
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_captures_job_id ON captures(job_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_job_id ON processed_videos(job_id)")

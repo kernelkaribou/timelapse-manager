@@ -2,8 +2,10 @@
 Captures API endpoints
 """
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from typing import List, Optional
 from datetime import datetime
+import os
 
 from ..models import CaptureResponse
 from ..database import get_db, dict_from_row
@@ -126,3 +128,25 @@ async def get_capture_time_range(
             "first_capture_time": first_time,
             "last_capture_time": last_time
         }
+
+
+@router.get("/{capture_id}/image")
+async def get_capture_image(capture_id: int):
+    """Serve the actual capture image file"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_path FROM captures WHERE id = ?", (capture_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Capture not found")
+        
+        file_path = row[0]
+        
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Capture file not found on disk")
+        
+        if not os.access(file_path, os.R_OK):
+            raise HTTPException(status_code=403, detail="No read permission for capture file")
+        
+        return FileResponse(file_path, media_type="image/jpeg")

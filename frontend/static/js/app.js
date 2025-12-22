@@ -68,7 +68,6 @@ function preventEnterSubmit(event) {
 document.addEventListener('DOMContentLoaded', () => {
     setupNavigation();
     loadJobs();
-    loadSettings();
     
     // Setup refresh intervals
     refreshIntervals.push(setInterval(loadJobs, 10000)); // Refresh jobs every 10s
@@ -138,7 +137,6 @@ function switchView(view) {
     // Load data for view
     if (view === 'jobs') loadJobs();
     if (view === 'videos') loadVideos();
-    if (view === 'settings') loadSettings();
 }
 
 // Jobs
@@ -180,7 +178,7 @@ function renderJobs(jobs) {
     
     container.innerHTML = jobs.map(job => {
         const thumbnailHtml = job.latest_capture 
-            ? `<div class="job-thumbnail" style="background-image: url('${getImageUrl(job.latest_capture.file_path)}'); background-size: cover; background-position: center; height: 120px; border-radius: 0.5rem; margin-bottom: 1rem;"></div>`
+            ? `<div class="job-thumbnail" style="background-image: url('${API_BASE}/captures/${job.latest_capture.id}/image'); background-size: cover; background-position: center; height: 120px; border-radius: 0.5rem; margin-bottom: 1rem;"></div>`
             : `<div class="job-thumbnail" style="background: var(--border-color); height: 120px; border-radius: 0.5rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">No captures yet</div>`;
         
         return `
@@ -227,7 +225,7 @@ async function showJobDetails(jobId) {
                 <div style="margin: 1.5rem 0;">
                     <h4 style="margin-bottom: 0.5rem;">Latest Capture</h4>
                     <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${formatDateTime(captures[0].captured_at)}</p>
-                    <img src="${getImageUrl(captures[0].file_path)}" alt="Latest capture" style="max-width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);">
+                    <img src="${API_BASE}/captures/${captures[0].id}/image" alt="Latest capture" style="max-width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);">
                 </div>
             `;
         }
@@ -698,11 +696,10 @@ function handleVideoDownload(event, videoId) {
 
 async function showProcessVideoModal(jobId, jobName) {
     try {
-        // Fetch job data, capture time range, and settings
-        const [job, timeRange, settings] = await Promise.all([
+        // Fetch job data and capture time range
+        const [job, timeRange] = await Promise.all([
             fetch(`${API_BASE}/jobs/${jobId}`).then(r => r.json()),
-            fetch(`${API_BASE}/captures/job/${jobId}/time-range`).then(r => r.json()),
-            fetch(`${API_BASE}/settings/`).then(r => r.json())
+            fetch(`${API_BASE}/captures/job/${jobId}/time-range`).then(r => r.json())
         ]);
         
         const captureCount = timeRange.count;
@@ -721,7 +718,7 @@ async function showProcessVideoModal(jobId, jobName) {
         document.getElementById('process_job_id').value = jobId;
         document.getElementById('video_name').value = `${jobName}_${timestamp}`;
         document.getElementById('video_framerate').value = job.framerate;
-        document.getElementById('video_output_path').value = settings.default_videos_path;
+        document.getElementById('video_output_path').value = '/timelapses';
         
         // Update modal title
         document.querySelector('#process-video-modal .modal-header h3').textContent = `Build Timelapse - ${jobName}`;
@@ -953,47 +950,6 @@ async function deleteVideo(videoId, videoName) {
     );
 }
 
-// Settings
-async function loadSettings() {
-    try {
-        const response = await fetch(`${API_BASE}/settings/`);
-        const settings = await response.json();
-        
-        document.getElementById('default_captures_path').value = settings.default_captures_path;
-        document.getElementById('default_videos_path').value = settings.default_videos_path;
-        document.getElementById('default_capture_pattern').value = settings.default_capture_pattern;
-    } catch (error) {
-        console.error('Failed to load settings:', error);
-    }
-}
-
-async function saveSettings(event) {
-    event.preventDefault();
-    
-    const formData = {
-        default_captures_path: document.getElementById('default_captures_path').value,
-        default_videos_path: document.getElementById('default_videos_path').value,
-        default_capture_pattern: document.getElementById('default_capture_pattern').value
-    };
-    
-    try {
-        const response = await fetch(`${API_BASE}/settings/`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData)
-        });
-        
-        if (response.ok) {
-            showNotification('Settings saved successfully!');
-        } else {
-            showNotification('Failed to save settings', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to save settings:', error);
-        showNotification('Failed to save settings', 'error');
-    }
-}
-
 // Modal management
 function showModal(modalId) {
     document.getElementById(modalId).classList.add('active');
@@ -1024,6 +980,10 @@ function showCreateJobModal() {
     // Don't set min on start date - allow past dates
     
     endInput.value = '';
+    
+    // Set default values for capture path and naming pattern
+    document.getElementById('capture_path').value = '/captures';
+    document.getElementById('naming_pattern').value = '{job_name}_{num:06d}_{timestamp}';
     
     // Set initial min for end date
     updateEndDateMin();
@@ -1056,14 +1016,6 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-function getImageUrl(filePath) {
-    // Convert container file path to web URL
-    // /captures/... -> /captures/... (already correct for static serving)
-    // /timelapses/... -> /videos/... (served as /videos in API)
-    if (!filePath) return '';
-    return filePath.replace('/timelapses', '/videos');
 }
 
 function getStreamHost(url) {

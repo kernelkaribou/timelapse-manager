@@ -128,18 +128,6 @@ class VideoResponse(BaseModel):
     completed_at: Optional[str]
 
 
-class SettingsUpdate(BaseModel):
-    default_captures_path: Optional[str] = None
-    default_videos_path: Optional[str] = None
-    default_capture_pattern: Optional[str] = None
-
-
-class SettingsResponse(BaseModel):
-    default_captures_path: str
-    default_videos_path: str
-    default_capture_pattern: str
-
-
 class TestUrlResponse(BaseModel):
     success: bool
     message: str

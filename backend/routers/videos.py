@@ -53,8 +53,8 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
                     detail=f"No write permission for output path: {videos_path}"
                 )
         else:
-            cursor.execute("SELECT value FROM settings WHERE key = 'default_videos_path'")
-            videos_path = cursor.fetchone()[0]
+            from .. import config
+            videos_path = config.DEFAULT_VIDEOS_PATH
         
         # Create video record - name already includes timestamp from frontend
         now = datetime.now().astimezone().isoformat()

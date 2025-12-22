@@ -16,7 +16,6 @@
             <div class="nav-links">
                 <a href="#" data-view="jobs" class="nav-link active">Jobs</a>
                 <a href="#" data-view="videos" class="nav-link">Timelapses</a>
-                <a href="#" data-view="settings" class="nav-link">Settings</a>
             </div>
         </nav>
 
@@ -37,31 +36,6 @@
                     <h2>Timelapses</h2>
                 </div>
                 <div id="videos-list" class="videos-grid"></div>
-            </div>
-
-            <!-- Settings View -->
-            <div id="settings-view" class="view">
-                <div class="view-header">
-                    <h2>Settings</h2>
-                </div>
-                <div class="settings-form">
-                    <form id="settings-form" onsubmit="saveSettings(event)">
-                        <div class="form-group">
-                            <label>Default Captures Path</label>
-                            <input type="text" id="default_captures_path" class="form-control" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Default Timelapses Path</label>
-                            <input type="text" id="default_videos_path" class="form-control" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Default Capture Naming Pattern</label>
-                            <input type="text" id="default_capture_pattern" class="form-control" required>
-                            <small>Available: {job_name}, {num:06d}, {timestamp}</small>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Save Settings</button>
-                    </form>
-                </div>
             </div>
         </main>
     </div>
