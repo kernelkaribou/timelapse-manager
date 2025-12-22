@@ -203,6 +203,11 @@ def _update_video_completed(video_id: int, file_size: int, total_frames: int, du
     """Mark video as completed with final metadata"""
     with get_db() as conn:
         cursor = conn.cursor()
+        
+        # Get video name for logging
+        cursor.execute("SELECT name FROM processed_videos WHERE id = ?", (video_id,))
+        video_name = cursor.fetchone()[0]
+        
         cursor.execute("""
             UPDATE processed_videos
             SET status = 'completed',
@@ -213,3 +218,5 @@ def _update_video_completed(video_id: int, file_size: int, total_frames: int, du
                 completed_at = ?
             WHERE id = ?
         """, (file_size, total_frames, duration_seconds, datetime.utcnow().isoformat(), video_id))
+        
+        logger.info(f"Completed video '{video_name}' (ID: {video_id}) - Frames: {total_frames}, Duration: {duration_seconds:.2f}s, Size: {file_size / (1024*1024):.2f}MB")

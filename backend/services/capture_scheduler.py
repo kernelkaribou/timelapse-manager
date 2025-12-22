@@ -10,7 +10,6 @@ import logging
 from ..database import get_db, dict_from_row
 from .image_capture import capture_image
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -103,12 +102,12 @@ class CaptureScheduler:
             
             if should_capture:
                 try:
-                    logger.info(f"Attempting capture for job {job_id}: {job['name']}")
+                    logger.debug(f"Attempting capture for job {job_id}: {job['name']}")
                     success, error_message = capture_image(job)
                     if success:
                         self.last_capture_times[job_id] = now
                         self.failure_counts[job_id] = 0  # Reset failure count on success
-                        logger.info(f"Captured image for job {job_id}: {job['name']}")
+                        logger.debug(f"Captured image for job {job_id}: {job['name']}")
                     else:
                         # Increment failure count
                         self.failure_counts[job_id] = self.failure_counts.get(job_id, 0) + 1

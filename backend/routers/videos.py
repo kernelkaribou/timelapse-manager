@@ -6,12 +6,14 @@ from fastapi.responses import FileResponse
 from typing import List, Optional
 from datetime import datetime
 import os
+import logging
 
 from ..models import VideoCreate, VideoResponse
 from ..database import get_db, dict_from_row
 from ..services.video_processor import process_video
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/", response_model=VideoResponse, status_code=201)
@@ -49,6 +51,8 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
         ))
         
         video_id = cursor.lastrowid
+        
+        logger.info(f"Started video processing for job '{job_dict['name']}' (ID: {video.job_id}) - Video: {video.name}, Resolution: {video.resolution}, FPS: {video.framerate}")
         
         # Start video processing in background
         background_tasks.add_task(
@@ -155,13 +159,13 @@ async def delete_video(video_id: int):
         cursor = conn.cursor()
         
         # Get video info
-        cursor.execute("SELECT file_path FROM processed_videos WHERE id = ?", (video_id,))
+        cursor.execute("SELECT name, file_path FROM processed_videos WHERE id = ?", (video_id,))
         row = cursor.fetchone()
         
         if not row:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        file_path = row[0]
+        name, file_path = row
         
         # Delete file if it exists
         if os.path.exists(file_path):
@@ -169,3 +173,5 @@ async def delete_video(video_id: int):
         
         # Delete record
         cursor.execute("DELETE FROM processed_videos WHERE id = ?", (video_id,))
+        
+        logger.info(f"Deleted video '{name}' (ID: {video_id})")

@@ -92,6 +92,8 @@ async def create_job(job: JobCreate):
         # Update the capture_path with the actual directory
         cursor.execute("UPDATE jobs SET capture_path = ? WHERE id = ?", (job_dir, job_id))
         cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        
+        logger.info(f"Created job '{job.name}' (ID: {job_id}) - Interval: {job.interval_seconds}s, Stream: {job.stream_type.value}")
         return dict_from_row(cursor.fetchone())
 
 
@@ -219,7 +221,14 @@ async def update_job(job_id: int, job_update: JobUpdate):
         
         # Return updated job
         cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-        return dict_from_row(cursor.fetchone())
+        updated_job = dict_from_row(cursor.fetchone())
+        
+        # Log changes
+        changes = [f"{field}" for field in job_update.model_fields_set]
+        if changes:
+            logger.info(f"Updated job '{current_job['name']}' (ID: {job_id}) - Changed: {', '.join(changes)}")
+        
+        return updated_job
 
 
 @router.delete("/{job_id}", status_code=204)
@@ -232,12 +241,12 @@ async def delete_job(job_id: int, delete_captures: bool = False):
         cursor = conn.cursor()
         
         # Check if job exists and get capture path
-        cursor.execute("SELECT capture_path FROM jobs WHERE id = ?", (job_id,))
+        cursor.execute("SELECT name, capture_path FROM jobs WHERE id = ?", (job_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        job_folder = row[0]
+        job_name, job_folder = row
         
         # Delete the entire job folder if requested
         if delete_captures and job_folder:
@@ -250,6 +259,8 @@ async def delete_job(job_id: int, delete_captures: bool = False):
         
         # Delete job (cascades to captures and videos records in DB)
         cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        
+        logger.info(f"Deleted job '{job_name}' (ID: {job_id}) - Captures deleted from disk: {delete_captures}")
 
 
 @router.post("/test-url", response_model=TestUrlResponse)

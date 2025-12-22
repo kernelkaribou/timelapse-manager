@@ -23,5 +23,8 @@ DEFAULT_CAPTURE_PATTERN = os.getenv("DEFAULT_CAPTURE_PATTERN", "{job_name}_{num:
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", 8080))
 
+# Logging settings
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 # FFMPEG settings
 FFMPEG_TIMEOUT = int(os.getenv("FFMPEG_TIMEOUT", 30))

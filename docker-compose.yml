@@ -1,17 +1,19 @@
 services:
   timelapse-manager:
     #image: ghcr.io/kernelkaribou/timelapse-manager:latest
+    build: .
     image: timelapse-manager:latest
     container_name: timelapse-manager
     environment:
-      # Recommended: Set user and group IDs for file permissions, Defaults to Root (0) if not set
+      # Recommended: Set user and group IDs for file permissions, Defaults to Root (0)
       - PUID=1000 
       - PGID=1000
-      # Recommended: Set timezone, Default is UTC if not set, otherwise you will have a bad time if not in UTC
+      # Recommended: Set timezone, Defaults to UTC, otherwise you will have a bad time if not in UTC
       - TZ=Etc/UTC
       # Optional environment variables:
+      # - LOG_LEVEL=INFO # Logging level: DEBUG, INFO, WARNING, ERROR. Default: INFO
       # - PORT=8080 # Set custom port
-      # - DATABASE_PATH=/app/data/timelapser.db # Set custom database path
+      # - DATABASE_PATH=/app/data/timelapse-manager.db # Set custom database path
       # - DEFAULT_CAPTURES_PATH=/captures # Set custom captures path
       # - DEFAULT_VIDEOS_PATH=/timelapses # Set custom videos path
       # - FFMPEG_TIMEOUT=10 # Set custom ffmpeg timeout in seconds
@@ -25,11 +27,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '2' # Limit to 2 CPU cores, adjust as needed
+          memory: 2G # Limit to 2GB RAM, adjust as needed
     # Security: Drop unnecessary capabilities
     cap_drop:
       - ALL

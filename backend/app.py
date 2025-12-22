@@ -7,10 +7,47 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
+import logging
+import sys
 
 from .database import init_db
 from .routers import jobs, captures, videos, settings
 from .services.capture_scheduler import CaptureScheduler
+from . import config
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+logger = logging.getLogger(__name__)
+
+
+class AccessLogFilter(logging.Filter):
+    """Filter to suppress routine GET requests from access logs at INFO level"""
+    def filter(self, record: logging.LogRecord) -> bool:
+        # At INFO level, suppress routine GET requests
+        if record.levelno == logging.INFO:
+            message = record.getMessage()
+            # Suppress GET requests to API endpoints for data loading
+            if '"GET /api/' in message and any(endpoint in message for endpoint in [
+                '/api/jobs',
+                '/api/videos',
+                '/api/captures',
+                '/api/settings'
+            ]):
+                return False
+            # Suppress static file requests, root path, and health checks
+            if '"GET /static/' in message or '"GET /captures/' in message or '"GET /videos/' in message or '"GET / HTTP' in message or '"GET /health' in message:
+                return False
+        return True
+
+
+# Apply filter to uvicorn access logger
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
+uvicorn_access_logger.addFilter(AccessLogFilter())
 
 # Global scheduler instance
 scheduler = None
@@ -25,15 +62,15 @@ async def lifespan(app: FastAPI):
     init_db()
     scheduler = CaptureScheduler()
     scheduler.start()
-    print("Database initialized")
-    print("Capture scheduler started")
+    logger.info("Database initialized")
+    logger.info(f"Capture scheduler started (Log Level: {config.LOG_LEVEL})")
     
     yield
     
     # Shutdown
     if scheduler:
         scheduler.stop()
-        print("Capture scheduler stopped")
+        logger.info("Capture scheduler stopped")
 
 
 app = FastAPI(

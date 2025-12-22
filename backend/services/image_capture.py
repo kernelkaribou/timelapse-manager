@@ -78,6 +78,7 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
                     WHERE id = ?
                 """, (file_size, datetime.now().isoformat(), job['id']))
             
+            logger.info(f"Captured image for job '{job['name']}' (ID: {job['id']}): {filename}")
             return True, None
         
         return False, error_msg or "Unknown capture error"

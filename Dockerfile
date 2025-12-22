@@ -41,6 +41,7 @@ LABEL org.opencontainers.image.title="Timelapse Manager" \
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Etc/UTC
 ENV PORT=8080
+ENV LOG_LEVEL=INFO
 ENV DATABASE_PATH=/app/data/timelapse-manager.db
 ENV DEFAULT_CAPTURES_PATH=/captures
 ENV DEFAULT_VIDEOS_PATH=/timelapses
