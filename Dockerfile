@@ -34,7 +34,7 @@ RUN mkdir -p /app/data /captures /timelapses && \
 # Add build metadata
 LABEL org.opencontainers.image.title="Timelapse Manager" \
       org.opencontainers.image.description="Configuration and management tool for timelapse videos" \
-      org.opencontainers.image.vendor="Your Name/Org" \
+      org.opencontainers.image.vendor="kernelkaribou" \
       org.opencontainers.image.source="https://github.com/kernelkaribou/timelapse-manager"
 
 # Set environment variables

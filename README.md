@@ -71,6 +71,18 @@ Environment variables:
 - **Video Processing:** FFMPEG
 - **Container:** Docker
 
+## Repository
+
+https://github.com/kernelkaribou/timelapse-manager
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests. However this is a fun, 100% AI coded project so I am not looking to maintain anything beyond realistic uses, primarily my own.
+
 ## License
 
-MIT License
+MIT License - See [LICENSE](LICENSE) file for details.
+
+## Author
+
+Maintained by [kernelkaribou](https://github.com/kernelkaribou)
