@@ -1,23 +1,45 @@
 services:
-  timelapser:
-    build: .
-    container_name: timelapser
+  timelapse-manager:
+    #image: ghcr.io/kernelkaribou/timelapse-manager:latest
+    image: timelapse-manager:latest
+    container_name: timelapse-manager
+    environment:
+      # Recommended: Set user and group IDs for file permissions, Defaults to Root (0) if not set
+      - PUID=1000 
+      - PGID=1000
+      # Recommended: Set timezone, Default is UTC if not set, otherwise you will have a bad time if not in UTC
+      - TZ=Etc/UTC
+      # Optional environment variables:
+      # - PORT=8080 # Set custom port
+      # - DATABASE_PATH=/app/data/timelapser.db # Set custom database path
+      # - DEFAULT_CAPTURES_PATH=/captures # Set custom captures path
+      # - DEFAULT_VIDEOS_PATH=/timelapses # Set custom videos path
+      # - FFMPEG_TIMEOUT=10 # Set custom ffmpeg timeout in seconds
     ports:
       - "8080:8080"
     volumes:
-      # Mount for captures storage
-      - ./captures:/mnt/captures
-      # Mount for processed videos
-      - ./timelapses:/mnt/timelapses
-      # Mount for persistent database
-      - ./data:/app/backend/data
-    environment:
-      - PORT=8080
-      - TZ=America/Chicago
-      - DATABASE_PATH=/app/backend/data/timelapser.db
-      - DEFAULT_CAPTURES_PATH=/mnt/captures
-      - DEFAULT_VIDEOS_PATH=/mnt/timelapses
-      - FFMPEG_TIMEOUT=30
+      - ${PWD}/captures:/captures
+      - ${PWD}/timelapses:/timelapses
+      - ${PWD}/data:/app/data
+    # Security: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # Security: Drop unnecessary capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -25,8 +47,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-volumes:
-  captures:
-  timelapses:
-  data:

@@ -178,7 +178,7 @@ function renderJobs(jobs) {
             <div class="job-card-header">
                 <div class="job-card-title">${escapeHtml(job.name)}</div>
                 <span class="job-status ${job.warning_message ? 'warning' : job.status}">
-                    ${job.warning_message ? '⚠ Warning' : (job.status.charAt(0).toUpperCase() + job.status.slice(1))}
+                    ${job.warning_message ? '⚠ Warning' : job.status === 'disabled' ? '⏸ Disabled' : (job.status.charAt(0).toUpperCase() + job.status.slice(1))}
                 </span>
             </div>
             <div class="job-info">
@@ -243,7 +243,7 @@ async function showJobDetails(jobId) {
                 
                 <div class="job-info" style="margin-bottom: 1.5rem;">
                     <div><strong>Name:</strong> ${escapeHtml(job.name)}</div>
-                    <div><strong>Status:</strong> <span class="job-status ${job.warning_message ? 'warning' : job.status}">${job.warning_message ? '⚠ Warning' : (job.status.charAt(0).toUpperCase() + job.status.slice(1))}</span></div>
+                    <div><strong>Status:</strong> <span class="job-status ${job.warning_message ? 'warning' : job.status}">${job.warning_message ? '⚠ Warning' : job.status === 'disabled' ? '⏸ Disabled' : (job.status.charAt(0).toUpperCase() + job.status.slice(1))}</span></div>
                     <div><strong>Start:</strong> ${formatDateTime(job.start_datetime)}</div>
                 </div>
 
@@ -278,9 +278,9 @@ async function showJobDetails(jobId) {
                         Build Timelapse
                     </button>
                     ${job.status === 'active' ? 
-                        `<button class="btn btn-secondary" onclick="updateJobStatus(${job.id}, 'disabled'); closeModal('job-details-modal')">Disable</button>` :
+                        `<button class="btn btn-secondary" onclick="updateJobStatus(${job.id}, 'disabled', '${escapeHtml(job.name)}'); closeModal('job-details-modal')">Disable</button>` :
                         job.status === 'disabled' ?
-                        `<button class="btn btn-secondary" onclick="updateJobStatus(${job.id}, 'active'); closeModal('job-details-modal')">Enable</button>` : ''
+                        `<button class="btn btn-secondary" onclick="updateJobStatus(${job.id}, 'active', '${escapeHtml(job.name)}'); closeModal('job-details-modal')">Enable</button>` : ''
                     }
                     <button class="btn btn-danger" onclick="closeModal('job-details-modal'); deleteJob(${job.id}, '${escapeHtml(job.name)}')">
                         Delete
@@ -337,7 +337,7 @@ async function createJob(event) {
     }
 }
 
-async function updateJobStatus(jobId, status) {
+async function updateJobStatus(jobId, status, jobName) {
     try {
         const response = await fetch(`${API_BASE}/jobs/${jobId}`, {
             method: 'PATCH',
@@ -347,7 +347,8 @@ async function updateJobStatus(jobId, status) {
         
         if (response.ok) {
             loadJobs();
-            showNotification(`Job ${status === 'active' ? 'enabled' : 'disabled'} successfully`);
+            const action = status === 'active' ? 'enabled' : 'disabled';
+            showNotification(`Job "${jobName}" ${action} successfully`);
         } else {
             showNotification('Failed to update job status', 'error');
         }
@@ -513,11 +514,11 @@ async function testUrl() {
             `;
         } else {
             resultDiv.className = 'test-result error';
-            resultDiv.innerHTML = `<p style="color: #e74c3c; margin-top: 10px;">✗ ${result.message}</p>`;
+            resultDiv.innerHTML = `<p style="color: #e74c3c; margin-top: 10px;">${result.message}</p>`;
         }
     } catch (error) {
         resultDiv.className = 'test-result error';
-        resultDiv.innerHTML = `<p style="color: #e74c3c; margin-top: 10px;">✗ Error: Please check the URL.</p>`;
+        resultDiv.innerHTML = `<p style="color: #e74c3c; margin-top: 10px;">Error: Please check the URL.</p>`;
     }
 }
 
@@ -873,10 +874,10 @@ function escapeHtml(text) {
 
 function getImageUrl(filePath) {
     // Convert container file path to web URL
-    // /mnt/captures/... -> /captures/...
-    // /mnt/timelapses/... -> /videos/...
+    // /captures/... -> /captures/... (already correct for static serving)
+    // /timelapses/... -> /videos/... (served as /videos in API)
     if (!filePath) return '';
-    return filePath.replace('/mnt/captures', '/captures').replace('/mnt/timelapses', '/videos');
+    return filePath.replace('/timelapses', '/videos');
 }
 
 function getStreamHost(url) {

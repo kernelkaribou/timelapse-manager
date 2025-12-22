@@ -108,13 +108,13 @@ class CaptureScheduler:
                     if success:
                         self.last_capture_times[job_id] = now
                         self.failure_counts[job_id] = 0  # Reset failure count on success
-                        logger.info(f"✓ Captured image for job {job_id}: {job['name']}")
+                        logger.info(f"Captured image for job {job_id}: {job['name']}")
                     else:
                         # Increment failure count
                         self.failure_counts[job_id] = self.failure_counts.get(job_id, 0) + 1
                         consecutive_failures = self.failure_counts[job_id]
                         
-                        logger.warning(f"✗ Capture failed for job {job_id}: {job['name']} - {error_message} (failure {consecutive_failures}/3)")
+                        logger.warning(f"Capture failed for job {job_id}: {job['name']} - {error_message} (failure {consecutive_failures}/3)")
                         
                         # Only set warning message after 3 consecutive failures
                         if consecutive_failures >= 3:

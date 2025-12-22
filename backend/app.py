@@ -25,15 +25,15 @@ async def lifespan(app: FastAPI):
     init_db()
     scheduler = CaptureScheduler()
     scheduler.start()
-    print("✓ Database initialized")
-    print("✓ Capture scheduler started")
+    print("Database initialized")
+    print("Capture scheduler started")
     
     yield
     
     # Shutdown
     if scheduler:
         scheduler.stop()
-        print("✓ Capture scheduler stopped")
+        print("Capture scheduler stopped")
 
 
 app = FastAPI(
@@ -62,10 +62,10 @@ app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
 
 # Serve capture images
-app.mount("/captures", StaticFiles(directory="/mnt/captures"), name="captures")
+app.mount("/captures", StaticFiles(directory="/captures"), name="captures")
 
 # Serve video files
-app.mount("/videos", StaticFiles(directory="/mnt/timelapses"), name="videos")
+app.mount("/videos", StaticFiles(directory="/timelapses"), name="videos")
 
 
 @app.get("/")

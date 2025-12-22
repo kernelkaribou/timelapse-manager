@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timelapse Manager</title>
+    <title>TimeLapse-Manager</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -11,11 +11,11 @@
         <!-- Navigation -->
         <nav class="navbar">
             <div class="nav-brand">
-                <h1>🎬 Timelapse Manager</h1>
+                <h1>TimeLapse-Manager</h1>
             </div>
             <div class="nav-links">
                 <a href="#" data-view="jobs" class="nav-link active">Jobs</a>
-                <a href="#" data-view="videos" class="nav-link">Videos</a>
+                <a href="#" data-view="videos" class="nav-link">Timelapses</a>
                 <a href="#" data-view="settings" class="nav-link">Settings</a>
             </div>
         </nav>
@@ -31,10 +31,10 @@
                 <div id="jobs-list" class="jobs-grid"></div>
             </div>
 
-            <!-- Videos View -->
+            <!-- Timelapses View -->
             <div id="videos-view" class="view">
                 <div class="view-header">
-                    <h2>Processed Videos</h2>
+                    <h2>Completed Timelapses</h2>
                 </div>
                 <div id="videos-list" class="videos-grid"></div>
             </div>
@@ -51,7 +51,7 @@
                             <input type="text" id="default_captures_path" class="form-control" required>
                         </div>
                         <div class="form-group">
-                            <label>Default Videos Path</label>
+                            <label>Default Timelapses Path</label>
                             <input type="text" id="default_videos_path" class="form-control" required>
                         </div>
                         <div class="form-group">
@@ -160,7 +160,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('create-job-modal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Job</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
                 </div>
             </form>
         </div>
@@ -256,7 +256,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('process-video-modal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Start Processing</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
                 </div>
             </form>
         </div>

@@ -1,4 +1,4 @@
-# Timelapse Manager
+# TimeLapse-Manager
 
 A comprehensive timelapse configuration and management tool with a web UI for creating, managing, and viewing timelapse videos from HTTP and RTSP video streams.
 
@@ -28,7 +28,7 @@ A comprehensive timelapse configuration and management tool with a web UI for cr
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd timelapser
+   cd timelapse-manager
    ```
 
 2. **Start with docker-compose**
@@ -64,18 +64,18 @@ A comprehensive timelapse configuration and management tool with a web UI for cr
 ### Environment Variables
 
 - `PORT`: Server port (default: 8080)
-- `DATABASE_PATH`: Path to SQLite database (default: ./backend/data/timelapser.db)
-- `DEFAULT_CAPTURES_PATH`: Default path for image captures (default: /mnt/captures)
-- `DEFAULT_VIDEOS_PATH`: Default path for processed videos (default: /mnt/timelapses)
+- `DATABASE_PATH`: Path to SQLite database (default: /app/data/timelapse-manager.db)
+- `DEFAULT_CAPTURES_PATH`: Default path for image captures (default: /captures)
+- `DEFAULT_VIDEOS_PATH`: Default path for processed videos (default: /timelapses)
 - `FFMPEG_TIMEOUT`: Timeout for FFMPEG operations in seconds (default: 30)
 
 ### Docker Volumes
 
 The docker-compose configuration mounts the following directories:
 
-- `./captures` → `/mnt/captures` - Captured images
-- `./timelapses` → `/mnt/timelapses` - Processed videos
-- `./data` → `/app/backend/data` - SQLite database
+- `./captures` → `/captures` - Captured images
+- `./timelapses` → `/timelapses` - Processed videos
+- `./data` → `/app/data` - SQLite database (for backups and persistence)
 
 ## Usage
 
@@ -199,7 +199,7 @@ uvicorn app:app --reload --host 0.0.0.0 --port 8080
 
 ### Project Structure
 ```
-timelapser/
+timelapse-manager/
 ├── backend/
 │   ├── app.py
 │   ├── config.py

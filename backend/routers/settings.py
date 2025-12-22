@@ -19,8 +19,8 @@ async def get_settings():
         settings = {row[0]: row[1] for row in cursor.fetchall()}
         
         return SettingsResponse(
-            default_captures_path=settings.get("default_captures_path", "/mnt/captures"),
-            default_videos_path=settings.get("default_videos_path", "/mnt/timelapses"),
+            default_captures_path=settings.get("default_captures_path", "/captures"),
+            default_videos_path=settings.get("default_videos_path", "/timelapses"),
             default_capture_pattern=settings.get("default_capture_pattern", "{job_name}_capture{num:06d}_{timestamp}"),
             default_video_pattern=settings.get("default_video_pattern", "{job_name}_{created_timestamp}")
         )

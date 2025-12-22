@@ -277,8 +277,8 @@ body {
 }
 
 .job-status.disabled {
-    background: #fee2e2;
-    color: #991b1b;
+    background: #e5e7eb;
+    color: #6b7280;
 }
 
 .job-status.archived {
@@ -543,7 +543,7 @@ body {
 /* Notification Toast */
 .notification-toast {
     position: fixed;
-    top: 20px;
+    top: 80px;
     right: 20px;
     background: var(--surface-color);
     color: var(--text-primary);
