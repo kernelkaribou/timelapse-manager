@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
+import secrets
+import string
 from . import config
 
 
@@ -23,10 +25,25 @@ def get_db():
         conn.close()
 
 
+def generate_api_key(length: int = 16) -> str:
+    """Generate a random alphanumeric API key"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
 def init_db():
     """Initialize the database with required tables"""
     with get_db() as conn:
         cursor = conn.cursor()
+        
+        # Settings table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
         
         # Jobs table
         cursor.execute("""
@@ -113,6 +130,16 @@ def init_db():
             cursor.execute("ALTER TABLE processed_videos ADD COLUMN start_time TEXT")
         if 'end_time' not in video_columns:
             cursor.execute("ALTER TABLE processed_videos ADD COLUMN end_time TEXT")
+        
+        # Initialize API key if not exists
+        cursor.execute("SELECT value FROM settings WHERE key = 'api_key'")
+        if not cursor.fetchone():
+            api_key = generate_api_key()
+            now = datetime.utcnow().isoformat()
+            cursor.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                ('api_key', api_key, now)
+            )
         
         conn.commit()
 

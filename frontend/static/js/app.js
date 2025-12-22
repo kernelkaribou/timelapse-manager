@@ -140,7 +140,7 @@ function setupNavigation() {
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
-            const view = e.target.dataset.view;
+            const view = e.currentTarget.dataset.view;
             switchView(view);
         });
     });
@@ -162,6 +162,7 @@ function switchView(view) {
     // Load data for view
     if (view === 'jobs') loadJobs();
     if (view === 'videos') loadVideos();
+    if (view === 'settings') loadSettings();
 }
 
 // Jobs
@@ -2381,3 +2382,60 @@ function setDateTimePickerValue(baseId, datetimeString, hiddenId) {
 
 // Initialize time pickers on page load
 document.addEventListener('DOMContentLoaded', initializeTimePickers);
+
+// Settings Functions
+async function loadSettings() {
+    const apiKeyInput = document.getElementById('api-key-display');
+    if (!apiKeyInput) {
+        console.error('API key input element not found');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/settings/api-key`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        apiKeyInput.value = data.api_key;
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+        showNotification('Failed to load settings', 'error');
+    }
+}
+
+async function copyApiKey() {
+    const input = document.getElementById('api-key-display');
+    try {
+        await navigator.clipboard.writeText(input.value);
+        showNotification('API key copied to clipboard', 'success');
+    } catch (error) {
+        // Fallback for older browsers
+        input.select();
+        document.execCommand('copy');
+        showNotification('API key copied to clipboard', 'success');
+    }
+}
+
+async function regenerateApiKey() {
+    showConfirm('Are you sure you want to regenerate the API key? This will invalidate the current key and any external integrations using it will need to be updated.', async (confirmed) => {
+        if (!confirmed) return;
+        
+        try {
+            const response = await fetch(`${API_BASE}/settings/api-key/regenerate`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to regenerate API key');
+            }
+            
+            const data = await response.json();
+            document.getElementById('api-key-display').value = data.api_key;
+            showNotification('API key regenerated successfully', 'success');
+        } catch (error) {
+            console.error('Failed to regenerate API key:', error);
+            showNotification('Failed to regenerate API key', 'error');
+        }
+    });
+}

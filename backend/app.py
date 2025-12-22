@@ -1,7 +1,7 @@
 """
 Main FastAPI application for Timelapse Manager
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +11,9 @@ import logging
 import sys
 
 from .database import init_db
-from .routers import jobs, captures, videos
+from .routers import jobs, captures, videos, settings
 from .services.capture_scheduler import CaptureScheduler
+from .auth import verify_api_key
 from . import config
 
 # Configure logging
@@ -77,7 +78,9 @@ app = FastAPI(
     title="Timelapse Manager",
     description="Configuration and management tool for timelapse videos",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False,
+    redoc_url=None  # Disable ReDoc, use Swagger UI only
 )
 
 # CORS middleware
@@ -90,9 +93,10 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
-app.include_router(captures.router, prefix="/api/captures", tags=["captures"])
-app.include_router(videos.router, prefix="/api/videos", tags=["videos"])
+app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(verify_api_key)])
+app.include_router(captures.router, prefix="/api/captures", tags=["captures"], dependencies=[Depends(verify_api_key)])
+app.include_router(videos.router, prefix="/api/videos", tags=["videos"], dependencies=[Depends(verify_api_key)])
+app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
 # Serve static files for frontend
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
