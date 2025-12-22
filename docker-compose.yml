@@ -1,8 +1,6 @@
 services:
   timelapse-manager:
-    #image: ghcr.io/kernelkaribou/timelapse-manager:latest
-    build: .
-    image: timelapse-manager:latest
+    image: ghcr.io/kernelkaribou/timelapse-manager:latest
     container_name: timelapse-manager
     environment:
       # Recommended environment variables:
