@@ -108,6 +108,7 @@ class VideoCreate(BaseModel):
 class VideoResponse(BaseModel):
     id: int
     job_id: int
+    job_name: Optional[str] = None
     name: str
     file_path: str
     file_size: int

@@ -5,6 +5,7 @@ const API_BASE = '/api';
 let currentView = 'jobs';
 let currentJobId = null;
 let refreshIntervals = [];
+let videoRefreshInterval = null;
 let confirmCallback = null;
 
 // Notification system
@@ -71,7 +72,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Setup refresh intervals
     refreshIntervals.push(setInterval(loadJobs, 10000)); // Refresh jobs every 10s
-    refreshIntervals.push(setInterval(loadVideos, 5000)); // Refresh videos every 5s
     
     // Setup event listeners for job creation form
     const startInput = document.getElementById('start_datetime');
@@ -567,6 +567,20 @@ async function loadVideos() {
     try {
         const response = await fetch(`${API_BASE}/videos/`);
         const videos = await response.json();
+        
+        // Check if any videos are processing
+        const hasProcessing = videos.some(v => v.status === 'processing');
+        
+        // Start refresh interval if there are processing videos
+        if (hasProcessing && !videoRefreshInterval) {
+            videoRefreshInterval = setInterval(loadVideos, 5000);
+        }
+        // Stop refresh interval if no processing videos
+        else if (!hasProcessing && videoRefreshInterval) {
+            clearInterval(videoRefreshInterval);
+            videoRefreshInterval = null;
+        }
+        
         renderVideos(videos);
     } catch (error) {
         console.error('Failed to load videos:', error);
@@ -588,30 +602,47 @@ function renderVideos(videos) {
     
     container.innerHTML = videos.map(video => `
         <div class="video-card">
-            <div class="video-card-header">
-                <div class="video-card-title">${escapeHtml(video.name)}</div>
-                <span class="job-status ${video.status}">${video.status}</span>
-            </div>
-            <div class="video-info">
-                <div><strong>Resolution:</strong> ${video.resolution} | <strong>FPS:</strong> ${video.framerate}</div>
-                <div><strong>Quality:</strong> ${video.quality}</div>
-                <div><strong>Frames:</strong> ${video.total_frames} | <strong>Duration:</strong> ${formatDuration(video.duration_seconds)}</div>
-                ${video.status === 'completed' ? `<div><strong>Size:</strong> ${formatBytes(video.file_size)}</div>` : ''}
-                <div><strong>Created:</strong> ${formatDateTime(video.created_at)}</div>
-            </div>
-            ${video.status === 'processing' ? `
-                <div class="video-progress">
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${video.progress}%"></div>
+            <div class="video-card-content">
+                <div class="video-card-main">
+                    <div class="video-card-header">
+                        <div class="video-card-title">${escapeHtml(video.name)}</div>
+                        <span class="job-status ${video.status}">${video.status}</span>
                     </div>
-                    <p style="font-size: 0.875rem; margin-top: 0.5rem; color: var(--text-secondary);">${Math.round(video.progress)}% complete</p>
+                    <div class="video-info">
+                        ${video.job_name ? `<div><strong>Job:</strong> ${escapeHtml(video.job_name)}</div>` : ''}
+                        <div><strong>Resolution:</strong> ${video.resolution} | <strong>FPS:</strong> ${video.framerate}</div>
+                        <div><strong>Quality:</strong> ${video.quality}</div>
+                        <div><strong>Frames:</strong> ${video.total_frames} | <strong>Duration:</strong> ${formatDuration(video.duration_seconds)}</div>
+                        ${video.status === 'completed' ? `<div><strong>Size:</strong> ${formatBytes(video.file_size)}</div>` : ''}
+                        <div><strong>Created:</strong> ${formatDateTime(video.created_at)}</div>
+                    </div>
+                    ${video.status === 'processing' ? `
+                        <div class="video-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${video.progress}%"></div>
+                            </div>
+                            <p style="font-size: 0.875rem; margin-top: 0.5rem; color: var(--text-secondary);">${Math.round(video.progress)}% complete</p>
+                        </div>
+                    ` : ''}
+                    <div class="video-actions">
+                        ${video.status === 'completed' ? `
+                            <a href="${API_BASE}/videos/${video.id}/download" class="btn btn-primary btn-sm">Download</a>
+                        ` : ''}
+                        <button class="btn btn-danger btn-sm" onclick="deleteVideo(${video.id}, '${escapeHtml(video.name)}')">Delete</button>
+                    </div>
                 </div>
-            ` : ''}
-            <div class="video-actions">
                 ${video.status === 'completed' ? `
-                    <a href="${API_BASE}/videos/${video.id}/download" class="btn btn-primary btn-sm">Download</a>
+                    <div class="video-preview" onclick="playVideo(${video.id}, '${escapeHtml(video.name)}')">
+                        <video class="video-thumbnail" preload="metadata" muted playsinline>
+                            <source src="${API_BASE}/videos/${video.id}/download#t=0.1" type="video/mp4">
+                        </video>
+                        <div class="play-overlay">
+                            <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                        </div>
+                    </div>
                 ` : ''}
-                <button class="btn btn-danger btn-sm" onclick="deleteVideo(${video.id}, '${escapeHtml(video.name)}')">Delete</button>
             </div>
         </div>
     `).join('');
@@ -814,6 +845,29 @@ async function processVideo(event) {
         console.error('Failed to process video:', error);
         showNotification('Failed to start video processing', 'error');
     }
+}
+
+function playVideo(videoId, videoName) {
+    const modal = document.getElementById('video-player-modal');
+    const video = document.getElementById('video-player');
+    const source = document.getElementById('video-source');
+    const title = document.getElementById('video-player-title');
+    
+    title.textContent = videoName;
+    source.src = `${API_BASE}/videos/${videoId}/download`;
+    video.load();
+    
+    modal.classList.add('active');
+    video.play();
+}
+
+function closeVideoPlayer() {
+    const modal = document.getElementById('video-player-modal');
+    const video = document.getElementById('video-player');
+    
+    video.pause();
+    video.currentTime = 0;
+    modal.classList.remove('active');
 }
 
 async function deleteVideo(videoId, videoName) {
@@ -1104,4 +1158,8 @@ window.onclick = function(event) {
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     refreshIntervals.forEach(interval => clearInterval(interval));
+    if (videoRefreshInterval) {
+        clearInterval(videoRefreshInterval);
+        videoRefreshInterval = null;
+    }
 });

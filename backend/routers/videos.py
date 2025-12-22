@@ -80,18 +80,23 @@ async def list_videos(
     with get_db() as conn:
         cursor = conn.cursor()
         
-        query = "SELECT * FROM processed_videos WHERE 1=1"
+        query = """
+            SELECT v.*, j.name as job_name
+            FROM processed_videos v
+            LEFT JOIN jobs j ON v.job_id = j.id
+            WHERE 1=1
+        """
         params = []
         
         if job_id is not None:
-            query += " AND job_id = ?"
+            query += " AND v.job_id = ?"
             params.append(job_id)
         
         if status is not None:
-            query += " AND status = ?"
+            query += " AND v.status = ?"
             params.append(status)
         
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY v.created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         
         cursor.execute(query, params)
@@ -103,7 +108,12 @@ async def get_video(video_id: int):
     """Get a specific video by ID"""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM processed_videos WHERE id = ?", (video_id,))
+        cursor.execute("""
+            SELECT v.*, j.name as job_name
+            FROM processed_videos v
+            LEFT JOIN jobs j ON v.job_id = j.id
+            WHERE v.id = ?
+        """, (video_id,))
         row = cursor.fetchone()
         
         if not row:

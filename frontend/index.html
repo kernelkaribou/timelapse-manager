@@ -258,6 +258,22 @@
         </div>
     </div>
 
+    <!-- Video Player Modal -->
+    <div id="video-player-modal" class="modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h3 id="video-player-title">Video Player</h3>
+                <button class="modal-close" onclick="closeVideoPlayer()">&times;</button>
+            </div>
+            <div style="padding: 1rem;">
+                <video id="video-player" controls style="width: 100%; max-height: 70vh; background: #000;">
+                    <source id="video-source" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>
