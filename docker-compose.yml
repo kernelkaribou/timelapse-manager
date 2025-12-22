@@ -5,13 +5,12 @@ services:
     image: timelapse-manager:latest
     container_name: timelapse-manager
     environment:
-      # Recommended: Set user and group IDs for file permissions, Defaults to Root (0)
+      # Recommended environment variables:
       - PUID=1000 
       - PGID=1000
-      # Recommended: Set timezone, Defaults to UTC, otherwise you will have a bad time if not in UTC
-      - TZ=America/Chicago
+      - TZ=Etc/UTC
       # Optional environment variables:
-      - LOG_LEVEL=DEBUG # Logging level: DEBUG, INFO, WARNING, ERROR. Default: INFO
+      # - LOG_LEVEL=INFO # Logging level: DEBUG, INFO, WARNING, ERROR. Default: INFO
       # - PORT=8080 # Set custom port
       # - FFMPEG_TIMEOUT=10 # Set custom ffmpeg timeout in seconds
     ports:
