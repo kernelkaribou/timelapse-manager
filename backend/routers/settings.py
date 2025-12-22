@@ -30,7 +30,7 @@ async def update_settings(settings_update: SettingsUpdate):
     """Update global settings"""
     with get_db() as conn:
         cursor = conn.cursor()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().astimezone().isoformat()
         
         if settings_update.default_captures_path is not None:
             cursor.execute("""

@@ -99,6 +99,7 @@ class VideoCreate(BaseModel):
     resolution: str = Field(default="1920x1080", pattern=r"^\d+x\d+$")
     framerate: int = Field(default=30, gt=0, le=120)
     quality: str = Field(default="high", pattern=r"^(low|medium|high|lossless)$")
+    output_path: Optional[str] = None
     start_capture_id: Optional[int] = None
     end_capture_id: Optional[int] = None
     start_time: Optional[str] = None  # ISO datetime string

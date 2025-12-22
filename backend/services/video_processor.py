@@ -82,6 +82,19 @@ def process_video(
         total_frames = len(captures)
         logger.info(f"Processing {total_frames} frames")
         
+        # Get first and last capture timestamps
+        first_capture_time = captures[0][4]  # captured_at from first capture
+        last_capture_time = captures[-1][4]  # captured_at from last capture
+        
+        # Update video with actual capture range
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE processed_videos
+                SET start_time = ?, end_time = ?
+                WHERE id = ?
+            """, (first_capture_time, last_capture_time, video_id))
+        
         # Create a temporary file list for ffmpeg
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
@@ -217,6 +230,6 @@ def _update_video_completed(video_id: int, file_size: int, total_frames: int, du
                 duration_seconds = ?,
                 completed_at = ?
             WHERE id = ?
-        """, (file_size, total_frames, duration_seconds, datetime.utcnow().isoformat(), video_id))
+        """, (file_size, total_frames, duration_seconds, datetime.now().astimezone().isoformat(), video_id))
         
         logger.info(f"Completed video '{video_name}' (ID: {video_id}) - Frames: {total_frames}, Duration: {duration_seconds:.2f}s, Size: {file_size / (1024*1024):.2f}MB")

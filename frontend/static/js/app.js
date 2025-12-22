@@ -216,6 +216,10 @@ async function showJobDetails(jobId) {
         
         const modal = document.getElementById('job-details-modal');
         const content = document.getElementById('job-details-content');
+        const title = document.getElementById('job-details-title');
+        
+        // Update modal title with job name
+        title.textContent = `${job.name} - Details`;
         
         let latestImageHtml = '';
         if (captures.length > 0) {
@@ -254,7 +258,6 @@ async function showJobDetails(jobId) {
                 ` : ''}
                 
                 <div class="job-info" style="margin-bottom: 1.5rem;">
-                    <div><strong>Name:</strong> ${escapeHtml(job.name)}</div>
                     <div><strong>Status:</strong> <span class="job-status ${job.warning_message ? 'warning' : job.status}">${job.warning_message ? '⚠ Warning' : job.status === 'disabled' ? '⏸ Disabled' : (job.status.charAt(0).toUpperCase() + job.status.slice(1))}</span></div>
                     <div><strong>Start:</strong> ${formatDateTime(job.start_datetime)}</div>
                 </div>
@@ -609,11 +612,16 @@ function renderVideos(videos) {
                         <span class="job-status ${video.status}">${video.status}</span>
                     </div>
                     <div class="video-info">
-                        ${video.job_name ? `<div><strong>Job:</strong> ${escapeHtml(video.job_name)}</div>` : ''}
+                        ${video.job_name ? 
+                            `<div><strong>Job:</strong> <a href="#" class="job-link" onclick="event.preventDefault(); navigateToJob(${video.job_id})">${escapeHtml(video.job_name)}</a></div>` : 
+                            `<div><strong>Job:</strong> <span class="text-muted">Unknown (removed)</span></div>`
+                        }
                         <div><strong>Resolution:</strong> ${video.resolution} | <strong>FPS:</strong> ${video.framerate}</div>
                         <div><strong>Quality:</strong> ${video.quality}</div>
                         <div><strong>Frames:</strong> ${video.total_frames} | <strong>Duration:</strong> ${formatDuration(video.duration_seconds)}</div>
                         ${video.status === 'completed' ? `<div><strong>Size:</strong> ${formatBytes(video.file_size)}</div>` : ''}
+                        ${video.start_time ? `<div><strong>Start:</strong> ${formatDateTime(video.start_time)}</div>` : ''}
+                        ${video.end_time ? `<div><strong>End:</strong> ${formatDateTime(video.end_time)}</div>` : ''}
                         <div><strong>Created:</strong> ${formatDateTime(video.created_at)}</div>
                     </div>
                     ${video.status === 'processing' ? `
@@ -626,17 +634,17 @@ function renderVideos(videos) {
                     ` : ''}
                     <div class="video-actions">
                         ${video.status === 'completed' ? `
-                            <a href="${API_BASE}/videos/${video.id}/download" class="btn btn-primary btn-sm">Download</a>
+                            <a href="${API_BASE}/videos/${video.id}/download" class="btn btn-primary btn-sm" onclick="return handleVideoDownload(event, ${video.id})">Download</a>
                         ` : ''}
                         <button class="btn btn-danger btn-sm" onclick="deleteVideo(${video.id}, '${escapeHtml(video.name)}')">Delete</button>
                     </div>
                 </div>
                 ${video.status === 'completed' ? `
-                    <div class="video-preview" onclick="playVideo(${video.id}, '${escapeHtml(video.name)}')">
-                        <video class="video-thumbnail" preload="metadata" muted playsinline>
+                    <div class="video-preview" id="preview-${video.id}" data-video-id="${video.id}">
+                        <video class="video-thumbnail" preload="metadata" muted playsinline onerror="handleVideoError(${video.id})">
                             <source src="${API_BASE}/videos/${video.id}/download#t=0.1" type="video/mp4">
                         </video>
-                        <div class="play-overlay">
+                        <div class="play-overlay" onclick="playVideo(${video.id}, '${escapeHtml(video.name)}')">
                             <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M8 5v14l11-7z"/>
                             </svg>
@@ -646,14 +654,55 @@ function renderVideos(videos) {
             </div>
         </div>
     `).join('');
+    
+    // Check file accessibility for completed videos
+    videos.filter(v => v.status === 'completed').forEach(video => {
+        checkVideoAccessibility(video.id);
+    });
+}
+
+async function checkVideoAccessibility(videoId) {
+    try {
+        const response = await fetch(`${API_BASE}/videos/${videoId}/check`);
+        const result = await response.json();
+        
+        if (!result.accessible) {
+            handleVideoError(videoId, result.reason);
+        }
+    } catch (error) {
+        console.error(`Failed to check video ${videoId} accessibility:`, error);
+    }
+}
+
+function handleVideoError(videoId, reason = 'Video file not found or not accessible') {
+    const preview = document.getElementById(`preview-${videoId}`);
+    if (preview) {
+        preview.innerHTML = `
+            <div class="video-error" title="${escapeHtml(reason)}">
+                <svg class="error-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+                <p style="font-size: 0.75rem; margin-top: 0.5rem; color: var(--text-secondary);">File Not Found</p>
+            </div>
+        `;
+        preview.style.cursor = 'default';
+        preview.onclick = null;
+    }
+}
+
+function handleVideoDownload(event, videoId) {
+    // Let the browser handle the download naturally
+    // The backend will return appropriate error if file doesn't exist
+    return true;
 }
 
 async function showProcessVideoModal(jobId, jobName) {
     try {
-        // Fetch job data and capture time range (not all captures)
-        const [job, timeRange] = await Promise.all([
+        // Fetch job data, capture time range, and settings
+        const [job, timeRange, settings] = await Promise.all([
             fetch(`${API_BASE}/jobs/${jobId}`).then(r => r.json()),
-            fetch(`${API_BASE}/captures/job/${jobId}/time-range`).then(r => r.json())
+            fetch(`${API_BASE}/captures/job/${jobId}/time-range`).then(r => r.json()),
+            fetch(`${API_BASE}/settings/`).then(r => r.json())
         ]);
         
         const captureCount = timeRange.count;
@@ -672,6 +721,7 @@ async function showProcessVideoModal(jobId, jobName) {
         document.getElementById('process_job_id').value = jobId;
         document.getElementById('video_name').value = `${jobName}_${timestamp}`;
         document.getElementById('video_framerate').value = job.framerate;
+        document.getElementById('video_output_path').value = settings.default_videos_path;
         
         // Update modal title
         document.querySelector('#process-video-modal .modal-header h3').textContent = `Build Timelapse - ${jobName}`;
@@ -821,6 +871,7 @@ async function processVideo(event) {
         resolution: resolution,
         framerate: parseInt(document.getElementById('video_framerate').value),
         quality: document.getElementById('video_quality').value,
+        output_path: document.getElementById('video_output_path').value.trim() || null,
         start_time: useRange ? toISOStringForQuery(document.getElementById('start_time').value, false) : null,
         end_time: useRange ? toISOStringForQuery(document.getElementById('end_time').value, true) : null
     };
@@ -868,6 +919,13 @@ function closeVideoPlayer() {
     video.pause();
     video.currentTime = 0;
     modal.classList.remove('active');
+}
+
+function navigateToJob(jobId) {
+    // Switch to jobs view
+    switchView('jobs');
+    // Open job details modal
+    setTimeout(() => showJobDetails(jobId), 100);
 }
 
 async function deleteVideo(videoId, videoName) {
@@ -1070,7 +1128,10 @@ function formatBytes(bytes) {
 
 function formatDateTime(isoString) {
     if (!isoString) return 'N/A';
+    // Parse the ISO string - it should now have timezone info
     const date = new Date(isoString);
+    // If the date is invalid, return the raw string
+    if (isNaN(date.getTime())) return isoString;
     return date.toLocaleString();
 }
 

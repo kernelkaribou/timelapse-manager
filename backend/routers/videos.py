@@ -30,12 +30,34 @@ async def create_video(video: VideoCreate, background_tasks: BackgroundTasks):
         
         job_dict = dict_from_row(job)
         
-        # Get video output path from settings
-        cursor.execute("SELECT value FROM settings WHERE key = 'default_videos_path'")
-        videos_path = cursor.fetchone()[0]
+        # Get video output path from custom path or settings
+        if video.output_path:
+            videos_path = video.output_path
+            
+            # Validate custom path
+            if not os.path.exists(videos_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Output path does not exist: {videos_path}"
+                )
+            
+            if not os.path.isdir(videos_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Output path is not a directory: {videos_path}"
+                )
+            
+            if not os.access(videos_path, os.W_OK):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No write permission for output path: {videos_path}"
+                )
+        else:
+            cursor.execute("SELECT value FROM settings WHERE key = 'default_videos_path'")
+            videos_path = cursor.fetchone()[0]
         
         # Create video record - name already includes timestamp from frontend
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().astimezone().isoformat()
         output_path = os.path.join(videos_path, f"{video.name}.mp4")
         
         cursor.execute("""
@@ -124,6 +146,31 @@ async def get_video(video_id: int):
             raise HTTPException(status_code=404, detail="Video not found")
         
         return dict_from_row(row)
+
+
+@router.get("/{video_id}/check")
+async def check_video_file(video_id: int):
+    """Check if video file exists and is accessible"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_path, status FROM processed_videos WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        file_path, status = row
+        
+        if status != "completed":
+            return {"accessible": False, "reason": "Video is still processing"}
+        
+        if not os.path.exists(file_path):
+            return {"accessible": False, "reason": "Video file not found on disk"}
+        
+        if not os.access(file_path, os.R_OK):
+            return {"accessible": False, "reason": "No read permission for video file"}
+        
+        return {"accessible": True, "reason": None}
 
 
 @router.get("/{video_id}/download")

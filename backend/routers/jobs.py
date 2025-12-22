@@ -50,7 +50,7 @@ async def create_job(job: JobCreate):
                 detail=f"No write permission for capture path: {job.capture_path}"
             )
         
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().astimezone().isoformat()
         
         # Insert job first to get the ID
         cursor.execute("""
@@ -213,7 +213,7 @@ async def update_job(job_id: int, job_update: JobUpdate):
             raise HTTPException(status_code=400, detail="No updates provided")
         
         updates.append("updated_at = ?")
-        values.append(datetime.now().isoformat())
+        values.append(datetime.now().astimezone().isoformat())
         values.append(job_id)
         
         query = f"UPDATE jobs SET {', '.join(updates)} WHERE id = ?"

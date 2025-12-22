@@ -3,7 +3,7 @@ Image capture service - handles capturing images from HTTP and RTSP streams
 """
 import subprocess
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import logging
 
@@ -11,6 +11,11 @@ from ..database import get_db
 from .. import config
 
 logger = logging.getLogger(__name__)
+
+
+def get_local_time():
+    """Get current time in local timezone"""
+    return datetime.now().astimezone()
 
 
 def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
@@ -30,8 +35,9 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
             cursor.execute("SELECT capture_count FROM jobs WHERE id = ?", (job['id'],))
             capture_count = cursor.fetchone()[0]
         
-        # Generate filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Generate filename and hierarchical path structure
+        now = get_local_time()
+        timestamp = now.strftime("%Y%m%d_%H%M%S")
         pattern = job['naming_pattern']
         
         # Replace placeholders in naming pattern
@@ -44,10 +50,18 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         )
         filename += ".jpg"
         
-        output_path = os.path.join(job['capture_path'], filename)
+        # Create hierarchical directory structure: job/year/month/day/hour/
+        date_path = os.path.join(
+            job['capture_path'],
+            str(now.year),
+            f"{now.month:02d}",
+            f"{now.day:02d}",
+            f"{now.hour:02d}"
+        )
+        output_path = os.path.join(date_path, filename)
         
         # Ensure directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        os.makedirs(date_path, exist_ok=True)
         
         # Capture based on stream type
         if job['stream_type'] == 'rtsp':
@@ -66,7 +80,7 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
                 cursor.execute("""
                     INSERT INTO captures (job_id, file_path, file_size, captured_at)
                     VALUES (?, ?, ?, ?)
-                """, (job['id'], output_path, file_size, datetime.now().isoformat()))
+                """, (job['id'], output_path, file_size, get_local_time().isoformat()))
                 
                 # Update job statistics and clear warning message
                 cursor.execute("""
@@ -76,7 +90,7 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
                         updated_at = ?,
                         warning_message = NULL
                     WHERE id = ?
-                """, (file_size, datetime.now().isoformat(), job['id']))
+                """, (file_size, get_local_time().isoformat(), job['id']))
             
             logger.info(f"Captured image for job '{job['name']}' (ID: {job['id']}): {filename}")
             return True, None

@@ -77,7 +77,7 @@ async def delete_capture(capture_id: int):
                 storage_size = storage_size - ?,
                 updated_at = ?
             WHERE id = ?
-        """, (file_size, datetime.utcnow().isoformat(), job_id))
+        """, (file_size, datetime.now().astimezone().isoformat(), job_id))
 
 
 @router.get("/job/{job_id}/count")
