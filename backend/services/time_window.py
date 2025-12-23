@@ -27,29 +27,53 @@ def parse_time_string(time_str: str) -> time:
 def is_time_in_window(current_time: time, start_time: time, end_time: time) -> bool:
     """
     Check if current_time falls within the window from start_time to end_time.
+    End time is INCLUSIVE to support:
+    - Same-minute windows (10:02-10:02 = entire minute from 10:02:00-10:02:59)
+    - Minute boundaries (10:15-10:16 = 10:15:00 through 10:16:59)
+    - Multi-minute windows (10:15-10:19 = 10:15:00 through 10:19:59)
     
     This handles windows that cross midnight. For example:
     - Window: 08:00 to 20:00 (doesn't cross midnight)
-      - 10:00 is IN the window
-      - 22:00 is NOT in the window
+      - 08:00:00 is IN the window (inclusive start)
+      - 19:59:59 is IN the window
+      - 20:00:00 is IN the window (inclusive end minute)
+      - 20:59:59 is IN the window (end minute includes all seconds)
+      - 21:00:00 is NOT in the window
     
     - Window: 22:00 to 02:00 (crosses midnight)
+      - 22:00 is IN the window (inclusive start)
       - 23:00 is IN the window (same day, after start)
-      - 01:00 is IN the window (next day, before end)
-      - 10:00 is NOT in the window
+      - 01:59 is IN the window (next day, before end)
+      - 02:00 through 02:59 is IN the window (inclusive end minute)
+      - 03:00 is NOT in the window
+    
+    Examples:
+      - Window 10:02-10:02: IN for 10:02:00-10:02:59 (same minute, 6 captures at 10s intervals)
+      - Window 10:15-10:16: IN for 10:15:00-10:16:59 (2 full minutes)
+      - Window 10:15-10:19: IN for 10:15:00-10:19:59 (5 full minutes)
     
     Logic:
+    - Compare only hours and minutes (ignore seconds)
+    - If start == end: Single minute, check if current hour:minute matches
     - If start < end: Normal window, check if start <= current <= end
-    - If start >= end: Window crosses midnight
+    - If start > end: Window crosses midnight
       - We're IN if: current >= start OR current <= end
     """
-    if start_time < end_time:
-        # Normal window (doesn't cross midnight)
-        return start_time <= current_time < end_time
+    # Create time objects with seconds set to 0 for comparison
+    # This makes the comparison minute-based rather than second-based
+    current_hm = time(current_time.hour, current_time.minute)
+    start_hm = time(start_time.hour, start_time.minute)
+    end_hm = time(end_time.hour, end_time.minute)
+    
+    if start_hm == end_hm:
+        # Same minute (e.g., 10:02-10:02) - entire minute is in window
+        return current_hm == start_hm
+    elif start_hm < end_hm:
+        # Normal window (doesn't cross midnight) - inclusive end
+        return start_hm <= current_hm <= end_hm
     else:
-        # Window crosses midnight
-        # We're in the window if we're after the start OR before the end
-        return current_time >= start_time or current_time < end_time
+        # Window crosses midnight - inclusive end
+        return current_hm >= start_hm or current_hm <= end_hm
 
 
 def calculate_next_window_start(now: datetime, start_time: time, end_time: time) -> datetime:
@@ -247,3 +271,60 @@ def should_job_capture_now(job: dict, now: Optional[datetime] = None) -> Tuple[b
             return False, 'outside_window'
     
     return True, 'ok'
+
+
+def calculate_next_scheduled_capture(job: dict, now: Optional[datetime] = None) -> datetime:
+    """
+    Universal calculator for next scheduled capture time.
+    
+    This handles all scenarios:
+    - Active jobs within time window: Calculate on schedule grid (start + N * interval)
+    - Jobs outside time window: Calculate next window start time
+    - Jobs before start time: Return start time
+    
+    Args:
+        job: Job dictionary with schedule configuration
+        now: Current time (defaults to get_now())
+    
+    Returns:
+        datetime: Next scheduled capture time
+    """
+    from ..utils import get_now, parse_iso
+    
+    if now is None:
+        now = get_now()
+    else:
+        now = ensure_timezone_aware(now)
+    
+    start_dt = parse_iso(job['start_datetime'])
+    interval = job['interval_seconds']
+    
+    # Check if job hasn't started yet
+    if now < start_dt:
+        return start_dt
+    
+    # Check if job should capture based on time window
+    should_capture, reason = should_job_capture_now(job, now)
+    
+    if should_capture:
+        # Job is in active window: calculate next capture on schedule grid
+        elapsed = (now - start_dt).total_seconds()
+        intervals_passed = int(elapsed / interval)
+        next_capture = start_dt + timedelta(seconds=(intervals_passed + 1) * interval)
+        
+        # Skip missed intervals - schedule for next future slot
+        while next_capture <= now:
+            intervals_passed += 1
+            next_capture = start_dt + timedelta(seconds=(intervals_passed + 1) * interval)
+        
+        return next_capture
+    elif reason == 'outside_window':
+        # Job is outside time window: calculate next window start
+        start_time = parse_time_string(job['time_window_start'])
+        end_time = parse_time_string(job['time_window_end'])
+        return calculate_next_window_start(now, start_time, end_time)
+    else:
+        # Job has ended or other issue: return far future
+        # This shouldn't normally happen as completed jobs aren't scheduled
+        return now + timedelta(days=365)
+

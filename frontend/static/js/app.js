@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadJobs();
     
     // Setup refresh intervals
-    refreshIntervals.push(setInterval(loadJobs, 10000)); // Refresh jobs every 10s
+    refreshIntervals.push(setInterval(loadJobs, 5000)); // Refresh jobs every 5s
     
     // Setup event listeners for job creation form
     const startInput = document.getElementById('start_datetime');
@@ -1585,7 +1585,9 @@ async function updateDurationEstimate() {
             const [startHour, startMin] = timeWindowStart.split(':').map(Number);
             const [endHour, endMin] = timeWindowEnd.split(':').map(Number);
             
-            const windowSpansMidnight = startHour > endHour || (startHour === startHour && startMin >= endMin);
+            // Check if window is same time (e.g., 10:15-10:15) or spans midnight
+            const isSameTime = startHour === endHour && startMin === endMin;
+            const windowSpansMidnight = startHour > endHour || (startHour === endHour && startMin > endMin);
             
             let totalCaptures = 0;
             let current = new Date(jobStart);
@@ -1606,7 +1608,12 @@ async function updateDurationEstimate() {
                 let dayWindowEnd = new Date(currentDay);
                 dayWindowEnd.setHours(endHour, endMin, 0, 0);
                 
-                if (windowSpansMidnight) {
+                if (isSameTime) {
+                    // Same time window (e.g., 10:15-10:15) - one minute duration
+                    // Set end to one minute after start to capture within that minute
+                    dayWindowEnd = new Date(dayWindowStart);
+                    dayWindowEnd.setMinutes(dayWindowEnd.getMinutes() + 1);
+                } else if (windowSpansMidnight) {
                     // If window spans midnight, end time is next day
                     dayWindowEnd.setDate(dayWindowEnd.getDate() + 1);
                 }
@@ -1649,9 +1656,15 @@ async function updateDurationEstimate() {
             
             // Calculate window duration in minutes
             let windowDurationMinutes;
-            if (windowEndMinutes > windowStartMinutes) {
+            const isSameTime = startHour === endHour && startMin === endMin;
+            
+            if (isSameTime) {
+                // Same time (e.g., 10:15-10:15) = 1 minute window
+                windowDurationMinutes = 1;
+            } else if (windowEndMinutes > windowStartMinutes) {
                 windowDurationMinutes = windowEndMinutes - windowStartMinutes;
             } else {
+                // Spans midnight
                 windowDurationMinutes = (24 * 60) - windowStartMinutes + windowEndMinutes;
             }
             

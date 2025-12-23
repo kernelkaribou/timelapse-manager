@@ -12,8 +12,8 @@ from ..database import get_db, dict_from_row
 from ..services.url_tester import test_stream_url
 from ..services.duration_calculator import calculate_duration
 from ..services.maintenance import scan_job_files, cleanup_missing_captures, import_orphaned_files
-from ..services.time_window import calculate_next_capture_time, should_job_capture_now, ensure_timezone_aware
-from ..utils import get_now, to_iso
+from ..services.time_window import should_job_capture_now, ensure_timezone_aware, calculate_next_capture_time
+from ..utils import get_now, to_iso, parse_iso
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,7 +77,8 @@ async def create_job(job: JobCreate):
                 detail=f"No write permission for capture path: {job.capture_path}"
             )
         
-        now = to_iso(get_now())
+        now = get_now()
+        now_str = to_iso(now)
         
         # Insert job first to get the ID
         cursor.execute("""
@@ -96,7 +97,7 @@ async def create_job(job: JobCreate):
             1 if job.time_window_enabled else 0,
             job.time_window_start if job.time_window_enabled else None,
             job.time_window_end if job.time_window_enabled else None,
-            now, now
+            now_str, now_str
         ))
         
         job_id = cursor.lastrowid
@@ -126,22 +127,20 @@ async def create_job(job: JobCreate):
         
         job_dict = dict_from_row(cursor.fetchone())
         
-        # Calculate correct initial status based on time window
+        # Calculate correct initial status and next_scheduled_capture_at using centralized calculator
+        from ..services.time_window import calculate_next_scheduled_capture, should_job_capture_now
         should_capture, reason = should_job_capture_now(job_dict)
         correct_status = 'active' if should_capture else 'sleeping'
-        
-        # Calculate initial next_scheduled_capture_at
-        # First capture should be at start_datetime (aligned to schedule grid)
-        next_capture_at = to_iso(job.start_datetime)
+        next_capture_at = calculate_next_scheduled_capture(job_dict, now)
         
         # Update status and next_scheduled_capture_at
         cursor.execute(
             "UPDATE jobs SET status = ?, next_scheduled_capture_at = ? WHERE id = ?",
-            (correct_status, next_capture_at, job_id)
+            (correct_status, to_iso(next_capture_at), job_id)
         )
         cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         job_dict = dict_from_row(cursor.fetchone())
-        logger.info(f"Job {job_id} initial status set to {correct_status} (reason: {reason}), next capture: {next_capture_at}")
+        logger.info(f"Job {job_id} initial status set to {correct_status} (reason: {reason}), next capture: {to_iso(next_capture_at)}")
         
         logger.info(f"Created job '{job.name}' (ID: {job_id}) - Interval: {job.interval_seconds}s, Stream: {job.stream_type.value}")
         return enrich_job_with_next_capture(job_dict)
@@ -247,14 +246,9 @@ async def update_job(job_id: int, job_update: JobUpdate):
                             status_code=400, 
                             detail=f"End time must be at least {current_job['interval_seconds']} seconds in the future"
                         )
-                
-                # If job is completed and end time is being extended, reactivate the job
-                # Status will be recalculated after all updates to consider time windows
-                if current_job['status'] == 'completed' and not is_completing:
-                    updates.append("status = ?")
-                    values.append('active')  # Will be adjusted for time windows later
             
             # Add to updates (can be None for ongoing jobs)
+            # Status will be recalculated later based on end_datetime and time windows
             updates.append("end_datetime = ?")
             values.append(to_iso(end_time) if end_time else None)
         
@@ -269,19 +263,78 @@ async def update_job(job_id: int, job_update: JobUpdate):
         if job_update.status is not None:
             updates.append("status = ?")
             values.append(job_update.status.value)
+            
+            # If re-enabling a disabled job, recalculate next_scheduled_capture_at
+            if current_job['status'] == 'disabled' and job_update.status.value == 'active':
+                from ..services.time_window import calculate_next_scheduled_capture
+                now = get_now()
+                next_capture = calculate_next_scheduled_capture(current_job, now)
+                
+                updates.append("next_scheduled_capture_at = ?")
+                values.append(to_iso(next_capture))
+                logger.info(f"Job {job_id}: Re-enabled, recalculated next capture to {to_iso(next_capture)}")
+        
+        # Track if schedule-affecting fields are being updated
+        schedule_changed = False
+        status_needs_recalc = False
         
         # Handle time window updates
         if job_update.time_window_enabled is not None:
             updates.append("time_window_enabled = ?")
             values.append(1 if job_update.time_window_enabled else 0)
+            schedule_changed = True
         
         if job_update.time_window_start is not None:
             updates.append("time_window_start = ?")
             values.append(job_update.time_window_start)
+            schedule_changed = True
         
         if job_update.time_window_end is not None:
             updates.append("time_window_end = ?")
             values.append(job_update.time_window_end)
+            schedule_changed = True
+        
+        # Check if interval or start time changed
+        if job_update.interval_seconds is not None:
+            schedule_changed = True
+        
+        if job_update.start_datetime is not None:
+            schedule_changed = True
+        
+        # End date changes affect status (completed -> active/sleeping)
+        if job_update.end_datetime is not None:
+            status_needs_recalc = True
+        
+        # Recalculate next_scheduled_capture_at and status if needed
+        if (schedule_changed or status_needs_recalc) and current_job['status'] in ('active', 'sleeping', 'completed'):
+            from ..services.time_window import calculate_next_scheduled_capture, should_job_capture_now
+            now = get_now()
+            
+            # Build updated job dict with new values
+            updated_job = current_job.copy()
+            if job_update.start_datetime is not None:
+                updated_job['start_datetime'] = to_iso(job_update.start_datetime)
+            if 'end_datetime' in job_update.model_fields_set:
+                updated_job['end_datetime'] = to_iso(job_update.end_datetime) if job_update.end_datetime else None
+            if job_update.interval_seconds is not None:
+                updated_job['interval_seconds'] = job_update.interval_seconds
+            if job_update.time_window_enabled is not None:
+                updated_job['time_window_enabled'] = job_update.time_window_enabled
+            if job_update.time_window_start is not None:
+                updated_job['time_window_start'] = job_update.time_window_start
+            if job_update.time_window_end is not None:
+                updated_job['time_window_end'] = job_update.time_window_end
+            
+            # Use centralized calculator for next capture time
+            next_capture = calculate_next_scheduled_capture(updated_job, now)
+            should_capture, reason = should_job_capture_now(updated_job, now)
+            correct_status = 'active' if should_capture else 'sleeping'
+            
+            updates.append("next_scheduled_capture_at = ?")
+            values.append(to_iso(next_capture))
+            updates.append("status = ?")
+            values.append(correct_status)
+            logger.info(f"Job {job_id}: Schedule/status updated, status={correct_status}, next capture at {to_iso(next_capture)}")
         
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")
