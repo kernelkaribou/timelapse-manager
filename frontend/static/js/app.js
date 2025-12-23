@@ -92,7 +92,12 @@ function toggleTimeWindow() {
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     setupNavigation();
-    loadJobs();
+    
+    // Load initial view based on URL hash or default to jobs
+    const hash = window.location.hash.slice(1); // Remove #
+    const validViews = ['jobs', 'videos', 'settings'];
+    const initialView = validViews.includes(hash) ? hash : 'jobs';
+    switchView(initialView, false); // false = don't push, use replaceState from setupNavigation
     
     // Setup refresh intervals
     refreshIntervals.push(setInterval(loadJobs, 5000)); // Refresh jobs every 5s
@@ -141,12 +146,23 @@ function setupNavigation() {
         link.addEventListener('click', (e) => {
             e.preventDefault();
             const view = e.currentTarget.dataset.view;
-            switchView(view);
+            switchView(view, true); // true = push to history
         });
     });
+    
+    // Handle browser back/forward buttons
+    window.addEventListener('popstate', (e) => {
+        if (e.state && e.state.view) {
+            switchView(e.state.view, false); // false = don't push to history
+        }
+    });
+    
+    // Set initial history state
+    const initialView = currentView || 'jobs';
+    history.replaceState({ view: initialView }, '', `#${initialView}`);
 }
 
-function switchView(view) {
+function switchView(view, pushState = true) {
     // Update navigation
     document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.toggle('active', link.dataset.view === view);
@@ -158,6 +174,11 @@ function switchView(view) {
     });
     
     currentView = view;
+    
+    // Push to browser history if requested
+    if (pushState) {
+        history.pushState({ view: view }, '', `#${view}`);
+    }
     
     // Load data for view
     if (view === 'jobs') loadJobs();
