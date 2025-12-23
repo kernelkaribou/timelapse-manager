@@ -130,12 +130,18 @@ async def create_job(job: JobCreate):
         should_capture, reason = should_job_capture_now(job_dict)
         correct_status = 'active' if should_capture else 'sleeping'
         
-        # Update status if it should be sleeping
-        if correct_status != job_dict['status']:
-            cursor.execute("UPDATE jobs SET status = ? WHERE id = ?", (correct_status, job_id))
-            cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-            job_dict = dict_from_row(cursor.fetchone())
-            logger.info(f"Job {job_id} initial status set to {correct_status} (reason: {reason})")
+        # Calculate initial next_scheduled_capture_at
+        # First capture should be at start_datetime (aligned to schedule grid)
+        next_capture_at = to_iso(job.start_datetime)
+        
+        # Update status and next_scheduled_capture_at
+        cursor.execute(
+            "UPDATE jobs SET status = ?, next_scheduled_capture_at = ? WHERE id = ?",
+            (correct_status, next_capture_at, job_id)
+        )
+        cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        job_dict = dict_from_row(cursor.fetchone())
+        logger.info(f"Job {job_id} initial status set to {correct_status} (reason: {reason}), next capture: {next_capture_at}")
         
         logger.info(f"Created job '{job.name}' (ID: {job_id}) - Interval: {job.interval_seconds}s, Stream: {job.stream_type.value}")
         return enrich_job_with_next_capture(job_dict)

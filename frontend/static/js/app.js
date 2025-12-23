@@ -239,8 +239,10 @@ function renderJobs(jobs) {
         
         // Next capture info
         let nextCaptureInfo = '';
-        if (job.next_capture_at && job.status !== 'disabled' && job.status !== 'completed') {
-            nextCaptureInfo = `<div><strong>Next Capture:</strong> ${formatDateTime(job.next_capture_at)}</div>`;
+        // Use next_scheduled_capture_at from scheduler (schedule-based) if available, fallback to next_capture_at
+        const nextCapture = job.next_scheduled_capture_at || job.next_capture_at;
+        if (nextCapture && job.status !== 'disabled' && job.status !== 'completed') {
+            nextCaptureInfo = `<div><strong>Next Capture:</strong> ${formatDateTime(nextCapture)}</div>`;
         }
         
         return `
@@ -256,8 +258,8 @@ function renderJobs(jobs) {
                 <div><strong>Stream URL:</strong> <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 250px; vertical-align: bottom;">${escapeHtml(getStreamHost(job.url))}</span></div>
                 <div><strong>Interval:</strong> ${job.interval_seconds}s</div>
                 ${timeWindowInfo}
-                ${job.start_datetime ? `<div><strong>Start:</strong> ${formatDateTime(job.start_datetime)}</div>` : ''}
-                ${job.end_datetime ? `<div><strong>End:</strong> ${formatDateTime(job.end_datetime)}</div>` : '<div><strong>Ongoing capture</strong></div>'}
+                ${job.start_datetime ? `<div><strong>Start:</strong> ${formatDateTimeNoSeconds(job.start_datetime)}</div>` : ''}
+                ${job.end_datetime ? `<div><strong>End:</strong> ${formatDateTimeNoSeconds(job.end_datetime)}</div>` : '<div><strong>Ongoing capture</strong></div>'}
                 ${lastCaptureInfo}
                 ${nextCaptureInfo}
                 <div style="margin-top: 0.5rem;">
@@ -337,8 +339,10 @@ async function showJobDetails(jobId) {
         
         // Next capture info
         let nextCaptureHtml = '';
-        if (job.next_capture_at && job.status !== 'disabled' && job.status !== 'completed') {
-            nextCaptureHtml = `<div><strong>Next Capture:</strong> ${formatDateTime(job.next_capture_at)}</div>`;
+        // Use next_scheduled_capture_at from scheduler (schedule-based) if available, fallback to next_capture_at
+        const nextCapture = job.next_scheduled_capture_at || job.next_capture_at;
+        if (nextCapture && job.status !== 'disabled' && job.status !== 'completed') {
+            nextCaptureHtml = `<div><strong>Next Capture:</strong> ${formatDateTime(nextCapture)}</div>`;
         }
         
         content.innerHTML = `
@@ -362,7 +366,7 @@ async function showJobDetails(jobId) {
                 
                 <div class="job-info" style="margin-bottom: 1rem;">
                     <div><strong>Status:</strong> <span class="job-status ${statusClass}">${statusLabel}</span></div>
-                    <div><strong>Start:</strong> ${formatDateTime(job.start_datetime)}</div>
+                    <div><strong>Start:</strong> ${formatDateTimeNoSeconds(job.start_datetime)}</div>
                     ${lastCaptureHtml}
                     ${nextCaptureHtml}
                 </div>
@@ -1007,8 +1011,8 @@ function renderVideos(videos) {
                         <div><strong>Quality:</strong> ${video.quality}</div>
                         <div><strong>Frames:</strong> ${video.total_frames} | <strong>Duration:</strong> ${formatDuration(video.duration_seconds)}</div>
                         ${video.status === 'completed' ? `<div><strong>Size:</strong> ${formatBytes(video.file_size)}</div>` : ''}
-                        ${video.start_time ? `<div><strong>Start:</strong> ${formatDateTime(video.start_time)}</div>` : ''}
-                        ${video.end_time ? `<div><strong>End:</strong> ${formatDateTime(video.end_time)}</div>` : ''}
+                        ${video.start_time ? `<div><strong>Start:</strong> ${formatDateTimeNoSeconds(video.start_time)}</div>` : ''}
+                        ${video.end_time ? `<div><strong>End:</strong> ${formatDateTimeNoSeconds(video.end_time)}</div>` : ''}
                         <div><strong>Created:</strong> ${formatDateTime(video.created_at)}</div>
                     </div>
                     ${video.status === 'processing' ? `
@@ -1470,7 +1474,7 @@ function getStreamHost(url) {
 function toUTCString(localDateTimeString) {
     // Convert datetime-local format (YYYY-MM-DDTHH:mm) to ISO string format
     // Note: Backend stores in local time, not UTC, so we format as local ISO
-    // Since datetime-local doesn't include seconds, we use :00 for start times
+    // Seconds are set to :00 for start times (schedule grid alignment)
     // and :59 for end times to be more inclusive
     if (!localDateTimeString) return null;
     const date = new Date(localDateTimeString);
@@ -1520,6 +1524,23 @@ function formatDateTime(isoString) {
         hour: '2-digit', 
         minute: '2-digit', 
         second: '2-digit',
+        hour12: false 
+    });
+}
+
+function formatDateTimeNoSeconds(isoString) {
+    if (!isoString) return 'N/A';
+    // Parse the ISO string - it should now have timezone info
+    const date = new Date(isoString);
+    // If the date is invalid, return the raw string
+    if (isNaN(date.getTime())) return isoString;
+    // Force 24-hour format without seconds
+    return date.toLocaleString('en-CA', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit',
+        hour: '2-digit', 
+        minute: '2-digit', 
         hour12: false 
     });
 }

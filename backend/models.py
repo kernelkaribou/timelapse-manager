@@ -105,7 +105,8 @@ class JobResponse(BaseModel):
     time_window_enabled: int = 0  # SQLite returns as int
     time_window_start: Optional[str] = None
     time_window_end: Optional[str] = None
-    next_capture_at: Optional[str] = None
+    next_scheduled_capture_at: Optional[str] = None  # New: scheduled capture time from DB
+    next_capture_at: Optional[str] = None  # Calculated field from enrich function
     created_at: str
     updated_at: str
 
