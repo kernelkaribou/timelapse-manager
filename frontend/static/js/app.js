@@ -8,6 +8,133 @@ let refreshIntervals = [];
 let videoRefreshInterval = null;
 let confirmCallback = null;
 
+// =============================================================================
+// Universal Utility Functions
+// =============================================================================
+
+/**
+ * Get element value with optional parsing and default
+ * @param {string} id - Element ID
+ * @param {Object} options - { parse: 'int'|'float'|'bool', default: any }
+ */
+function getValue(id, options = {}) {
+    const element = document.getElementById(id);
+    if (!element) return options.default ?? null;
+    
+    let value = element.type === 'checkbox' ? element.checked : element.value;
+    
+    // Handle empty string
+    if (value === '' && options.default !== undefined) {
+        return options.default;
+    }
+    
+    // Parse if requested
+    if (options.parse === 'int') return parseInt(value) || options.default || 0;
+    if (options.parse === 'float') return parseFloat(value) || options.default || 0;
+    if (options.parse === 'bool') return Boolean(value);
+    
+    return value || options.default || null;
+}
+
+/**
+ * Set element value (works with inputs, selects, checkboxes)
+ */
+function setValue(id, value) {
+    const element = document.getElementById(id);
+    if (!element) return;
+    
+    if (element.type === 'checkbox') {
+        element.checked = Boolean(value);
+    } else {
+        element.value = value ?? '';
+    }
+}
+
+/**
+ * Universal API request wrapper with error handling
+ * @param {string} endpoint - API endpoint (relative to API_BASE)
+ * @param {Object} options - fetch options { method, body, query }
+ */
+async function apiRequest(endpoint, options = {}) {
+    const { method = 'GET', body = null, query = null } = options;
+    
+    // Build URL with query params
+    let url = `${API_BASE}${endpoint}`;
+    if (query) {
+        const params = new URLSearchParams();
+        Object.entries(query).forEach(([key, val]) => {
+            if (val !== null && val !== undefined) params.append(key, val);
+        });
+        const queryStr = params.toString();
+        if (queryStr) url += `?${queryStr}`;
+    }
+    
+    const fetchOptions = {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {}
+    };
+    
+    if (body) {
+        fetchOptions.body = JSON.stringify(body);
+    }
+    
+    const response = await fetch(url, fetchOptions);
+    
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(error.detail || `Request failed: ${response.status}`);
+    }
+    
+    // Return parsed JSON or null for 204 responses
+    return response.status === 204 ? null : await response.json();
+}
+
+/**
+ * Batch get values from multiple elements
+ * @param {Object} config - { elementId: { parse?, default? } }
+ * @returns {Object} - { elementId: value }
+ */
+function getValues(config) {
+    const result = {};
+    Object.entries(config).forEach(([key, opts]) => {
+        result[key] = getValue(key, opts || {});
+    });
+    return result;
+}
+
+/**
+ * Batch set values to multiple elements
+ * @param {Object} values - { elementId: value }
+ */
+function setValues(values) {
+    Object.entries(values).forEach(([id, value]) => {
+        setValue(id, value);
+    });
+}
+
+/**
+ * Clear form elements
+ * @param {string[]} ids - Array of element IDs to clear
+ */
+function clearValues(ids) {
+    ids.forEach(id => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        
+        if (element.type === 'checkbox') {
+            element.checked = false;
+        } else if (element.tagName === 'FORM') {
+            element.reset();
+        } else {
+            element.value = '';
+        }
+    });
+}
+
+// =============================================================================
+// End Universal Utilities
+// =============================================================================
+
 // Notification system
 function showNotification(message, type = 'success') {
     const toast = document.getElementById('notification-toast');
@@ -189,14 +316,12 @@ function switchView(view, pushState = true) {
 // Jobs
 async function loadJobs() {
     try {
-        const response = await fetch(`${API_BASE}/jobs/`);
-        const jobs = await response.json();
+        const jobs = await apiRequest('/jobs/');
         
         // Get latest captures for each job
         const jobsWithCaptures = await Promise.all(jobs.map(async (job) => {
             try {
-                const capturesResp = await fetch(`${API_BASE}/captures/?job_id=${job.id}&limit=1`);
-                const captures = await capturesResp.json();
+                const captures = await apiRequest('/captures/', { query: { job_id: job.id, limit: 1 } });
                 job.latest_capture = captures.length > 0 ? captures[0] : null;
             } catch (error) {
                 job.latest_capture = null;
@@ -524,19 +649,29 @@ async function showJobDetails(jobId) {
 async function createJob(event) {
     event.preventDefault();
     
-    const url = document.getElementById('job_url').value;
-    // Auto-detect stream type from URL
-    const stream_type = url.toLowerCase().startsWith('rtsp://') ? 'rtsp' : 'http';
+    // Get all form values using universal utility
+    const values = getValues({
+        job_name: {},
+        job_url: {},
+        start_datetime: {},
+        end_datetime: {},
+        interval_seconds: { parse: 'int' },
+        framerate: { parse: 'int' },
+        capture_path: {},
+        naming_pattern: {},
+        time_window_enabled: { parse: 'bool' },
+        time_window_start: {},
+        time_window_end: {}
+    });
     
-    const startDatetime = document.getElementById('start_datetime').value;
-    const endDatetime = document.getElementById('end_datetime').value || null;
-    const intervalSeconds = parseInt(document.getElementById('interval_seconds').value);
+    // Auto-detect stream type from URL
+    const stream_type = values.job_url.toLowerCase().startsWith('rtsp://') ? 'rtsp' : 'http';
     
     // Validate dates
-    const startDate = new Date(startDatetime);
+    const startDate = new Date(values.start_datetime);
     
-    if (endDatetime) {
-        const endDate = new Date(endDatetime);
+    if (values.end_datetime) {
+        const endDate = new Date(values.end_datetime);
         const now = new Date();
         
         if (endDate <= startDate) {
@@ -549,47 +684,38 @@ async function createJob(event) {
             return;
         }
         
-        const minEnd = new Date(startDate.getTime() + intervalSeconds * 1000);
+        const minEnd = new Date(startDate.getTime() + values.interval_seconds * 1000);
         if (endDate < minEnd) {
-            showNotification(`End date must be at least ${intervalSeconds} seconds after start date`, 'error');
+            showNotification(`End date must be at least ${values.interval_seconds} seconds after start date`, 'error');
             return;
         }
     }
     
     const formData = {
-        name: document.getElementById('job_name').value,
-        url: url,
+        name: values.job_name,
+        url: values.job_url,
         stream_type: stream_type,
-        start_datetime: startDatetime,
-        end_datetime: endDatetime,
-        interval_seconds: intervalSeconds,
-        framerate: parseInt(document.getElementById('framerate').value),
-        capture_path: document.getElementById('capture_path').value || null,
-        naming_pattern: document.getElementById('naming_pattern').value || null,
-        time_window_enabled: document.getElementById('time_window_enabled').checked,
-        time_window_start: document.getElementById('time_window_enabled').checked ? document.getElementById('time_window_start').value : null,
-        time_window_end: document.getElementById('time_window_enabled').checked ? document.getElementById('time_window_end').value : null
+        start_datetime: values.start_datetime,
+        end_datetime: values.end_datetime,
+        interval_seconds: values.interval_seconds,
+        framerate: values.framerate,
+        capture_path: values.capture_path,
+        naming_pattern: values.naming_pattern,
+        time_window_enabled: values.time_window_enabled,
+        time_window_start: values.time_window_enabled ? values.time_window_start : null,
+        time_window_end: values.time_window_enabled ? values.time_window_end : null
     };
     
     try {
-        const response = await fetch(`${API_BASE}/jobs/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData)
-        });
+        await apiRequest('/jobs/', { method: 'POST', body: formData });
         
-        if (response.ok) {
-            closeModal('create-job-modal');
-            document.getElementById('create-job-form').reset();
-            loadJobs();
-            showNotification(`Job "${formData.name}" created successfully!`);
-        } else {
-            const error = await response.json();
-            showNotification(`Failed to create job: ${error.detail || 'Unknown error'}`, 'error');
-        }
+        closeModal('create-job-modal');
+        document.getElementById('create-job-form').reset();
+        loadJobs();
+        showNotification(`Job "${formData.name}" created successfully!`);
     } catch (error) {
         console.error('Failed to create job:', error);
-        showNotification('Failed to create job', 'error');
+        showNotification(`Failed to create job: ${error.message}`, 'error');
     }
 }
 

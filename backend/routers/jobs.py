@@ -306,35 +306,43 @@ async def update_job(job_id: int, job_update: JobUpdate):
             status_needs_recalc = True
         
         # Recalculate next_scheduled_capture_at and status if needed
+        # BUT: Don't override explicit status changes to completed/disabled
         if (schedule_changed or status_needs_recalc) and current_job['status'] in ('active', 'sleeping', 'completed'):
-            from ..services.time_window import calculate_next_scheduled_capture, should_job_capture_now
-            now = get_now()
+            # Skip recalculation if user explicitly set status to completed or disabled
+            explicit_status_change = job_update.status is not None and job_update.status.value in ('completed', 'disabled')
             
-            # Build updated job dict with new values
-            updated_job = current_job.copy()
-            if job_update.start_datetime is not None:
-                updated_job['start_datetime'] = to_iso(job_update.start_datetime)
-            if 'end_datetime' in job_update.model_fields_set:
-                updated_job['end_datetime'] = to_iso(job_update.end_datetime) if job_update.end_datetime else None
-            if job_update.interval_seconds is not None:
-                updated_job['interval_seconds'] = job_update.interval_seconds
-            if job_update.time_window_enabled is not None:
-                updated_job['time_window_enabled'] = job_update.time_window_enabled
-            if job_update.time_window_start is not None:
-                updated_job['time_window_start'] = job_update.time_window_start
-            if job_update.time_window_end is not None:
-                updated_job['time_window_end'] = job_update.time_window_end
+            # Force recalculation if a completed job's end date is extended to the future
+            force_recalc = current_job['status'] == 'completed' and status_needs_recalc and not explicit_status_change
             
-            # Use centralized calculator for next capture time
-            next_capture = calculate_next_scheduled_capture(updated_job, now)
-            should_capture, reason = should_job_capture_now(updated_job, now)
-            correct_status = 'active' if should_capture else 'sleeping'
-            
-            updates.append("next_scheduled_capture_at = ?")
-            values.append(to_iso(next_capture))
-            updates.append("status = ?")
-            values.append(correct_status)
-            logger.info(f"Job {job_id}: Schedule/status updated, status={correct_status}, next capture at {to_iso(next_capture)}")
+            if not explicit_status_change or force_recalc:
+                from ..services.time_window import calculate_next_scheduled_capture, should_job_capture_now
+                now = get_now()
+                
+                # Build updated job dict with new values
+                updated_job = current_job.copy()
+                if job_update.start_datetime is not None:
+                    updated_job['start_datetime'] = to_iso(job_update.start_datetime)
+                if 'end_datetime' in job_update.model_fields_set:
+                    updated_job['end_datetime'] = to_iso(job_update.end_datetime) if job_update.end_datetime else None
+                if job_update.interval_seconds is not None:
+                    updated_job['interval_seconds'] = job_update.interval_seconds
+                if job_update.time_window_enabled is not None:
+                    updated_job['time_window_enabled'] = job_update.time_window_enabled
+                if job_update.time_window_start is not None:
+                    updated_job['time_window_start'] = job_update.time_window_start
+                if job_update.time_window_end is not None:
+                    updated_job['time_window_end'] = job_update.time_window_end
+                
+                # Use centralized calculator for next capture time
+                next_capture = calculate_next_scheduled_capture(updated_job, now)
+                should_capture, reason = should_job_capture_now(updated_job, now)
+                correct_status = 'active' if should_capture else 'sleeping'
+                
+                updates.append("next_scheduled_capture_at = ?")
+                values.append(to_iso(next_capture))
+                updates.append("status = ?")
+                values.append(correct_status)
+                logger.info(f"Job {job_id}: Schedule/status updated, status={correct_status}, next capture at {to_iso(next_capture)}")
         
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")

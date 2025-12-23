@@ -123,6 +123,7 @@ class CaptureScheduler:
         now = get_now()
         
         # First, update any completed jobs
+        # Don't complete if there's a pending capture scheduled at or before end_datetime
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -131,6 +132,10 @@ class CaptureScheduler:
                 WHERE status IN ('active', 'sleeping')
                 AND end_datetime IS NOT NULL
                 AND datetime(end_datetime) < datetime(?)
+                AND (
+                    next_scheduled_capture_at IS NULL 
+                    OR datetime(next_scheduled_capture_at) > datetime(end_datetime)
+                )
             """, (to_iso(now), to_iso(now)))
             
             if cursor.rowcount > 0:
@@ -145,11 +150,19 @@ class CaptureScheduler:
                     self.scheduled_captures.pop(job_id, None)
             
             # Get active and sleeping jobs
+            # Include jobs past their end_datetime if they have a pending capture scheduled at/before end
             cursor.execute("""
                 SELECT * FROM jobs
                 WHERE status IN ('active', 'sleeping')
                 AND datetime(start_datetime) <= datetime(?)
-                AND (end_datetime IS NULL OR datetime(end_datetime) >= datetime(?))
+                AND (
+                    end_datetime IS NULL 
+                    OR datetime(end_datetime) >= datetime(?)
+                    OR (
+                        next_scheduled_capture_at IS NOT NULL
+                        AND datetime(next_scheduled_capture_at) <= datetime(end_datetime)
+                    )
+                )
             """, (to_iso(now), to_iso(now)))
             
             active_jobs = [dict_from_row(row) for row in cursor.fetchall()]
