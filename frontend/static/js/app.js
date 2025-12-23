@@ -1378,7 +1378,14 @@ async function deleteVideo(videoId, videoName) {
 
 // Modal management
 function showModal(modalId) {
-    document.getElementById(modalId).classList.add('active');
+    const modal = document.getElementById(modalId);
+    modal.classList.add('active');
+    
+    // Always scroll to top when opening any modal
+    const modalContent = modal.querySelector('.modal-content');
+    if (modalContent) {
+        modalContent.scrollTop = 0;
+    }
 }
 
 function closeModal(modalId) {
@@ -1389,6 +1396,8 @@ function closeModal(modalId) {
         document.getElementById('create-job-form').reset();
         document.getElementById('test-result').innerHTML = '';
         document.getElementById('duration-estimate').innerHTML = '';
+        // Reset datetime to now for next time modal opens
+        setDefaultStartTime();
     }
     
     // Clean up video modal listeners to prevent memory leaks
@@ -1406,10 +1415,15 @@ function closeModal(modalId) {
 }
 
 function showCreateJobModal() {
-    // Default values are set by setDefaultStartTime() which is called on page load
-    // Custom datetime pickers handle date/hour/minute separately
+    // Reset the form to clear any previous values
+    document.getElementById('create-job-form').reset();
     
-    const intervalInput = document.getElementById('interval_seconds');
+    // Clear test results and estimates
+    document.getElementById('test-result').innerHTML = '';
+    document.getElementById('duration-estimate').innerHTML = '';
+    
+    // Set default datetime to now
+    setDefaultStartTime();
     
     // Set default values for capture path and naming pattern
     document.getElementById('capture_path').value = '/captures';
