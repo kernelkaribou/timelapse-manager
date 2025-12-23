@@ -65,3 +65,19 @@ def parse_iso(iso_string: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=get_local_timezone())
     return dt
+
+
+def ensure_timezone_aware(dt: datetime) -> datetime:
+    """
+    Ensure a datetime object is timezone-aware.
+    If naive, assumes local timezone.
+    
+    Args:
+        dt: datetime object (timezone-aware or naive)
+        
+    Returns:
+        datetime: Timezone-aware datetime object
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=get_local_timezone())
+    return dt

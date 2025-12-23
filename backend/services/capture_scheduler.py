@@ -1,5 +1,6 @@
 """
 Capture scheduler service - manages automatic image captures for all active jobs
+REFACTORED: Uses context-aware job_state calculator
 """
 import threading
 import time
@@ -11,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..database import get_db, dict_from_row
 from ..utils import get_now, to_iso, parse_iso
 from .image_capture import capture_image
-from .time_window import should_job_capture_now
+from .job_state import calculate_job_state, should_execute_capture
 
 logger = logging.getLogger(__name__)
 
@@ -60,97 +61,78 @@ class CaptureScheduler:
             try:
                 self._check_and_capture()
             except Exception as e:
-                logger.error(f"Error in scheduler loop: {e}")
+                logger.error(f"Error in scheduler loop: {e}", exc_info=True)
             
-            # Sleep for 10 seconds
+            # Sleep for 10 seconds before next check
             time.sleep(10)
     
     def _hydrate_from_database(self):
-        """Load scheduled capture times from database into memory on startup"""
+        """Load all active/sleeping jobs and their schedules into memory on startup"""
         now = get_now()
         
         with get_db() as conn:
             cursor = conn.cursor()
+            # Get all jobs that might need scheduling (not disabled/completed)
             cursor.execute("""
                 SELECT * FROM jobs
                 WHERE status IN ('active', 'sleeping')
                 AND datetime(start_datetime) <= datetime(?)
-                AND (end_datetime IS NULL OR datetime(end_datetime) >= datetime(?))
-            """, (to_iso(now), to_iso(now)))
+            """, (to_iso(now),))
             
             jobs = [dict_from_row(row) for row in cursor.fetchall()]
         
         for job in jobs:
             job_id = job['id']
             
-            # Check if job has a scheduled capture time in the database
-            if job.get('next_scheduled_capture_at'):
-                try:
-                    scheduled_time = parse_iso(job['next_scheduled_capture_at'])
-                    self.scheduled_captures[job_id] = scheduled_time
-                    logger.debug(f"Loaded scheduled capture for job {job_id}: {to_iso(scheduled_time)}")
-                except Exception as e:
-                    logger.warning(f"Failed to parse next_scheduled_capture_at for job {job_id}: {e}")
-                    # Calculate initial schedule
-                    self._calculate_and_set_next_capture(job, now)
-            else:
-                # No scheduled time in DB, calculate it
-                self._calculate_and_set_next_capture(job, now)
+            # Calculate state with pending capture awareness
+            pending = parse_iso(job['next_scheduled_capture_at']) if job.get('next_scheduled_capture_at') else None
+            status, next_capture, reason = calculate_job_state(job, now, pending)
+            
+            if status == 'active' and next_capture:
+                self.scheduled_captures[job_id] = next_capture
+                logger.debug(f"Loaded scheduled capture for job {job_id}: {to_iso(next_capture)}")
         
         logger.info(f"Hydrated {len(self.scheduled_captures)} scheduled captures from database")
     
-    def _calculate_and_set_next_capture(self, job: dict, reference_time: datetime):
-        """Calculate next scheduled capture using centralized calculator"""
-        from .time_window import calculate_next_scheduled_capture
-        
+    def _update_job_status(self, job: dict, now: datetime) -> None:
+        """
+        Update job status based on current conditions.
+        Uses context-aware calculator that understands pending captures.
+        """
         job_id = job['id']
-        next_capture = calculate_next_scheduled_capture(job, reference_time)
+        current_status = job['status']
         
-        # Store in memory and database
-        self.scheduled_captures[job_id] = next_capture
+        # Get pending capture if one exists
+        pending = parse_iso(job['next_scheduled_capture_at']) if job.get('next_scheduled_capture_at') else None
         
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE jobs SET next_scheduled_capture_at = ?, updated_at = ? WHERE id = ?",
-                (to_iso(next_capture), to_iso(reference_time), job_id)
-            )
+        # Calculate correct state with full context
+        new_status, next_capture, reason = calculate_job_state(job, now, pending)
         
-        logger.debug(f"Calculated next capture for job {job_id} ({job['name']}): {to_iso(next_capture)}")
+        # Update database if status changed
+        if new_status != current_status:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE jobs SET status = ?, warning_message = NULL, updated_at = ? WHERE id = ?",
+                    (new_status, to_iso(now), job_id)
+                )
+            job['status'] = new_status
+            logger.info(f"Job {job_id} ({job['name']}) status: {current_status} -> {new_status} - {reason}")
+        
+        # Update in-memory queue
+        if new_status == 'active' and next_capture:
+            self.scheduled_captures[job_id] = next_capture
+        else:
+            self.scheduled_captures.pop(job_id, None)
     
     def _check_and_capture(self):
         """Check scheduled jobs and capture if it's time, using parallel execution"""
         now = get_now()
         
-        # First, update any completed jobs
-        # Don't complete if there's a pending capture scheduled at or before end_datetime
+        # Get all jobs that might need processing
+        # Include jobs with pending captures even if past end_datetime
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE jobs 
-                SET status = 'completed', warning_message = NULL, updated_at = ?
-                WHERE status IN ('active', 'sleeping')
-                AND end_datetime IS NOT NULL
-                AND datetime(end_datetime) < datetime(?)
-                AND (
-                    next_scheduled_capture_at IS NULL 
-                    OR datetime(next_scheduled_capture_at) > datetime(end_datetime)
-                )
-            """, (to_iso(now), to_iso(now)))
-            
-            if cursor.rowcount > 0:
-                logger.info(f"Updated {cursor.rowcount} job(s) to completed status")
-                # Remove completed jobs from scheduled captures
-                cursor.execute("""
-                    SELECT id FROM jobs
-                    WHERE status = 'completed'
-                """)
-                completed_ids = [row[0] for row in cursor.fetchall()]
-                for job_id in completed_ids:
-                    self.scheduled_captures.pop(job_id, None)
-            
-            # Get active and sleeping jobs
-            # Include jobs past their end_datetime if they have a pending capture scheduled at/before end
             cursor.execute("""
                 SELECT * FROM jobs
                 WHERE status IN ('active', 'sleeping')
@@ -165,152 +147,44 @@ class CaptureScheduler:
                 )
             """, (to_iso(now), to_iso(now)))
             
-            active_jobs = [dict_from_row(row) for row in cursor.fetchall()]
+            jobs = [dict_from_row(row) for row in cursor.fetchall()]
         
-        logger.debug(f"Check at {to_iso(now)}: Found {len(active_jobs)} active/sleeping jobs")
+        logger.debug(f"Check at {to_iso(now)}: Found {len(jobs)} active/sleeping jobs")
         
-        # FIRST: Update job statuses based on time windows (sleeping <-> active transitions)
-        # This must happen BEFORE capture checks so newly awakened jobs can capture
-        for job in active_jobs:
-            job_id = job['id']
-            should_capture_window, reason = should_job_capture_now(job, now)
-            
-            if not should_capture_window and reason == 'outside_window':
-                if job['status'] != 'sleeping':
-                    # Check if there's a pending capture whose SCHEDULED time was within the window
-                    # This ensures we don't miss boundary captures even if current time is past window
-                    scheduled_time = self.scheduled_captures.get(job_id)
-                    should_delay_sleep = False
-                    
-                    if scheduled_time:
-                        # There's a pending capture - check if its scheduled time was within the window
-                        from .time_window import is_time_in_window, parse_time_string
-                        if job.get('time_window_enabled'):
-                            start_time = parse_time_string(job['time_window_start'])
-                            end_time = parse_time_string(job['time_window_end'])
-                            if is_time_in_window(scheduled_time.time(), start_time, end_time):
-                                # Pending capture's scheduled time is within window, delay sleep
-                                # Allow it to execute even if current time is now past the window
-                                should_delay_sleep = True
-                                logger.debug(f"Job {job_id} ({job['name']}): Delaying sleep, pending boundary capture at {to_iso(scheduled_time)}")
-                    
-                    if should_delay_sleep:
-                        continue
-                    
-                    # Calculate next wake-up time for accurate next_scheduled_capture_at
-                    from .time_window import calculate_next_window_start, parse_time_string
-                    if job.get('time_window_enabled'):
-                        start_time = parse_time_string(job['time_window_start'])
-                        end_time = parse_time_string(job['time_window_end'])
-                        next_window_start = calculate_next_window_start(now, start_time, end_time)
-                        # Set next_scheduled_capture_at to when window reopens
-                        next_scheduled_for_sleep = next_window_start
-                    else:
-                        # No time window, calculate next capture normally
-                        start_dt = parse_iso(job['start_datetime'])
-                        interval = job['interval_seconds']
-                        elapsed = (now - start_dt).total_seconds()
-                        intervals_passed = int(elapsed / interval)
-                        next_scheduled_for_sleep = start_dt + timedelta(seconds=(intervals_passed + 1) * interval)
-                    
-                    with get_db() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "UPDATE jobs SET status = 'sleeping', next_scheduled_capture_at = ?, warning_message = NULL, updated_at = ? WHERE id = ?",
-                            (to_iso(next_scheduled_for_sleep), to_iso(now), job_id)
-                        )
-                    # Update in-memory queue and clear it since we're sleeping
-                    self.scheduled_captures.pop(job_id, None)
-                    logger.info(f"Job {job_id} ({job['name']}) is now sleeping (outside time window), next wake at {to_iso(next_scheduled_for_sleep)}")
-                    # Update the job dict for subsequent processing
-                    job['status'] = 'sleeping'
-            elif should_capture_window and job['status'] == 'sleeping':
-                # Job is waking up - check if it already has a valid scheduled time
-                existing_scheduled = None
-                if job.get('next_scheduled_capture_at'):
-                    try:
-                        existing_scheduled = parse_iso(job['next_scheduled_capture_at'])
-                    except:
-                        pass
-                
-                # If no existing schedule or it's in the past, set to now for immediate capture
-                # Otherwise, keep the existing schedule to maintain grid alignment
-                if existing_scheduled is None or existing_scheduled < now:
-                    capture_time = now
-                    logger.info(f"Job {job_id} ({job['name']}) is now active (entered time window, will capture immediately)")
-                else:
-                    capture_time = existing_scheduled
-                    logger.info(f"Job {job_id} ({job['name']}) is now active (entered time window, maintaining schedule at {to_iso(capture_time)})")
-                
-                with get_db() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE jobs SET status = 'active', next_scheduled_capture_at = ?, updated_at = ? WHERE id = ?",
-                        (to_iso(capture_time), to_iso(now), job_id)
-                    )
-                    # Update in-memory queue
-                    self.scheduled_captures[job_id] = capture_time
-                    # Update the job dict for subsequent processing
-                    job['status'] = 'active'
-                    job['next_scheduled_capture_at'] = to_iso(capture_time)
+        # PHASE 1: Update job statuses (sleeping/active/completed)
+        for job in jobs:
+            self._update_job_status(job, now)
         
-        # SECOND: Collect jobs that need capturing (after status updates)
-        # This ensures newly awakened jobs are already marked active
+        # PHASE 2: Collect jobs ready for capture
         jobs_to_capture = []
-        for job in active_jobs:
-            job_id = job['id']
-            
-            # Skip sleeping jobs - they shouldn't be collected for capture
-            if job['status'] == 'sleeping':
+        for job in jobs:
+            # Skip if not active after update
+            if job['status'] != 'active':
                 continue
             
-            # Check if job is not in our schedule yet (new job or re-enabled)
-            if job_id not in self.scheduled_captures:
-                # Check if job has a next_scheduled_capture_at in DB that's in the past (stale)
-                if job.get('next_scheduled_capture_at'):
-                    try:
-                        scheduled_time = parse_iso(job['next_scheduled_capture_at'])
-                        if scheduled_time <= now:
-                            # Stale schedule, recalculate
-                            logger.info(f"Job {job_id} ({job['name']}): Stale schedule detected, recalculating")
-                            self._calculate_and_set_next_capture(job, now)
-                        else:
-                            # Valid future schedule, use it
-                            self.scheduled_captures[job_id] = scheduled_time
-                    except Exception as e:
-                        logger.warning(f"Failed to parse next_scheduled_capture_at for job {job_id}: {e}")
-                        self._calculate_and_set_next_capture(job, now)
-                else:
-                    # No schedule in DB, calculate new one
-                    self._calculate_and_set_next_capture(job, now)
-            
+            job_id = job['id']
             scheduled_time = self.scheduled_captures.get(job_id)
             
-            # Check if scheduled time has arrived
+            # Check if capture time has arrived
             if not scheduled_time or now < scheduled_time:
                 continue
             
-            # For time-windowed jobs, verify the scheduled capture time was within the window
-            # This allows boundary captures to execute even if current time is past the window
-            if job.get('time_window_enabled'):
-                from .time_window import is_time_in_window, parse_time_string
-                start_time = parse_time_string(job['time_window_start'])
-                end_time = parse_time_string(job['time_window_end'])
-                if not is_time_in_window(scheduled_time.time(), start_time, end_time):
-                    # Scheduled time was outside window, skip this capture
-                    logger.debug(f"Job {job_id} ({job['name']}): Skipping capture, scheduled time {to_iso(scheduled_time)} was outside window")
-                    continue
+            # Validate this capture should execute
+            should_execute, reason = should_execute_capture(job, scheduled_time, now)
+            if not should_execute:
+                logger.debug(f"Job {job_id} ({job['name']}): Skipping capture - {reason}")
+                continue
             
             # Only capture if not already in progress
             with self._lock:
                 if job_id not in self.captures_in_progress:
                     jobs_to_capture.append(job)
-                    self.captures_in_progress.add(job_id)  # Mark as in progress immediately
+                    self.captures_in_progress.add(job_id)
                     logger.debug(f"Job {job_id} ({job['name']}) ready for capture (scheduled: {to_iso(scheduled_time)})")
                 else:
-                    logger.info(f"Job {job_id} ({job['name']}): Skipped capture (already in progress since {to_iso(scheduled_time)})")
+                    logger.info(f"Job {job_id} ({job['name']}): Skipped capture (already in progress)")
         
-        # Execute captures in parallel if there are any
+        # PHASE 3: Execute captures in parallel
         if jobs_to_capture:
             self._execute_captures_parallel(jobs_to_capture, now)
     
@@ -319,10 +193,10 @@ class CaptureScheduler:
         logger.debug(f"Executing {len(jobs)} capture(s) in parallel")
         
         # Submit all capture tasks
-        future_to_job = {}
-        for job in jobs:
-            future = self.executor.submit(self._capture_and_update, job, capture_time)
-            future_to_job[future] = job
+        future_to_job = {
+            self.executor.submit(self._execute_single_capture, job, capture_time): job
+            for job in jobs
+        }
         
         # Wait for all captures to complete
         for future in as_completed(future_to_job):
@@ -330,10 +204,10 @@ class CaptureScheduler:
             try:
                 future.result()  # This will raise any exceptions that occurred
             except Exception as e:
-                logger.error(f"Unexpected error in parallel capture for job {job['id']}: {e}", exc_info=True)
+                logger.error(f"Capture task failed for job {job['id']}: {e}", exc_info=True)
     
-    def _capture_and_update(self, job: dict, capture_time: datetime):
-        """Perform capture and update schedule - used by parallel executor"""
+    def _execute_single_capture(self, job: dict, capture_time: datetime):
+        """Execute a single capture and update the schedule"""
         job_id = job['id']
         
         try:
@@ -379,23 +253,45 @@ class CaptureScheduler:
                     cursor = conn.cursor()
                     cursor.execute(
                         "UPDATE jobs SET warning_message = ? WHERE id = ?",
-                        (f"Capture error: {str(e)} (after {consecutive_failures} consecutive failures)", job_id)
+                        (f"Exception during capture: {str(e)} (after {consecutive_failures} consecutive failures)", job_id)
                     )
         finally:
-            # Reload job status to check if it went to sleep during capture
+            # Calculate next capture using context-aware calculator
             with get_db() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT status FROM jobs WHERE id = ?", (job_id,))
+                cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
                 row = cursor.fetchone()
-                current_status = row[0] if row else None
-            
-            # Only recalculate next capture for active jobs
-            # Sleeping jobs should keep their wake-up time, not schedule-based calculation
-            if current_status == 'active':
-                self._calculate_and_set_next_capture(job, capture_time)
-            else:
-                logger.debug(f"Job {job_id} is {current_status}, skipping next capture calculation")
+                if row:
+                    job = dict_from_row(row)
+                    
+                    # Calculate next state (no pending capture now - we just captured)
+                    new_status, next_capture, reason = calculate_job_state(job, capture_time, pending_capture_time=None)
+                    
+                    # Update database
+                    cursor.execute(
+                        "UPDATE jobs SET status = ?, next_scheduled_capture_at = ?, updated_at = ? WHERE id = ?",
+                        (new_status, to_iso(next_capture) if next_capture else None, to_iso(capture_time), job_id)
+                    )
+                    
+                    # Update in-memory queue
+                    if new_status == 'active' and next_capture:
+                        self.scheduled_captures[job_id] = next_capture
+                        logger.debug(f"Job {job_id} next capture at {to_iso(next_capture)}")
+                    else:
+                        self.scheduled_captures.pop(job_id, None)
+                        logger.info(f"Job {job_id} status: {new_status}")
             
             # Remove from in-progress set
             with self._lock:
                 self.captures_in_progress.discard(job_id)
+
+
+# Singleton instance
+_scheduler_instance = None
+
+def get_scheduler() -> CaptureScheduler:
+    """Get the singleton scheduler instance"""
+    global _scheduler_instance
+    if _scheduler_instance is None:
+        _scheduler_instance = CaptureScheduler()
+    return _scheduler_instance

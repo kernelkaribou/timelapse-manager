@@ -191,45 +191,33 @@ def process_video(
 
 def _update_progress(video_id: int, progress: float):
     """Update video processing progress"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE processed_videos
-            SET progress = ?
-            WHERE id = ?
-        """, (min(progress, 100.0), video_id))
+    from .state_manager import update_video_state
+    update_video_state(video_id, 'processing', min(progress, 100.0))
 
 
 def _update_video_status(video_id: int, status: str, progress: float, message: str = ""):
     """Update video status"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE processed_videos
-            SET status = ?, progress = ?
-            WHERE id = ?
-        """, (status, progress, video_id))
-        logger.info(f"Video {video_id} status: {status} - {message}")
+    from .state_manager import update_video_state
+    update_video_state(video_id, status, progress, message)
+    logger.info(f"Video {video_id} status: {status} - {message}")
 
 
 def _update_video_completed(video_id: int, file_size: int, total_frames: int, duration_seconds: float):
     """Mark video as completed with final metadata"""
+    from .state_manager import update_video_state
+    
     with get_db() as conn:
         cursor = conn.cursor()
-        
-        # Get video name for logging
         cursor.execute("SELECT name FROM processed_videos WHERE id = ?", (video_id,))
         video_name = cursor.fetchone()[0]
-        
-        cursor.execute("""
-            UPDATE processed_videos
-            SET status = 'completed',
-                progress = 100,
-                file_size = ?,
-                total_frames = ?,
-                duration_seconds = ?,
-                completed_at = ?
-            WHERE id = ?
-        """, (file_size, total_frames, duration_seconds, datetime.now().astimezone().isoformat(), video_id))
-        
-        logger.info(f"Completed video '{video_name}' (ID: {video_id}) - Frames: {total_frames}, Duration: {duration_seconds:.2f}s, Size: {file_size / (1024*1024):.2f}MB")
+    
+    update_video_state(
+        video_id,
+        'completed',
+        progress=100,
+        file_size=file_size,
+        total_frames=total_frames,
+        duration_seconds=duration_seconds
+    )
+    
+    logger.info(f"Completed video '{video_name}' (ID: {video_id}) - Frames: {total_frames}, Duration: {duration_seconds:.2f}s, Size: {file_size / (1024*1024):.2f}MB")

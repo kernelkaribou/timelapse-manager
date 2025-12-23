@@ -273,7 +273,7 @@ def should_job_capture_now(job: dict, now: Optional[datetime] = None) -> Tuple[b
     return True, 'ok'
 
 
-def calculate_next_scheduled_capture(job: dict, now: Optional[datetime] = None) -> datetime:
+def calculate_next_scheduled_capture(job: dict, now: Optional[datetime] = None) -> Optional[datetime]:
     """
     Universal calculator for next scheduled capture time.
     
@@ -281,13 +281,14 @@ def calculate_next_scheduled_capture(job: dict, now: Optional[datetime] = None) 
     - Active jobs within time window: Calculate on schedule grid (start + N * interval)
     - Jobs outside time window: Calculate next window start time
     - Jobs before start time: Return start time
+    - Jobs that have ended: Return None
     
     Args:
         job: Job dictionary with schedule configuration
         now: Current time (defaults to get_now())
     
     Returns:
-        datetime: Next scheduled capture time
+        datetime or None: Next scheduled capture time, or None if job has ended
     """
     from ..utils import get_now, parse_iso
     
@@ -317,14 +318,29 @@ def calculate_next_scheduled_capture(job: dict, now: Optional[datetime] = None) 
             intervals_passed += 1
             next_capture = start_dt + timedelta(seconds=(intervals_passed + 1) * interval)
         
+        # Check if next capture would be past end_datetime
+        if job.get('end_datetime'):
+            end_dt = parse_iso(job['end_datetime'])
+            if next_capture > end_dt:
+                # No more captures scheduled
+                return None
+        
         return next_capture
     elif reason == 'outside_window':
         # Job is outside time window: calculate next window start
         start_time = parse_time_string(job['time_window_start'])
         end_time = parse_time_string(job['time_window_end'])
-        return calculate_next_window_start(now, start_time, end_time)
+        next_window = calculate_next_window_start(now, start_time, end_time)
+        
+        # Check if next window start would be past end_datetime
+        if job.get('end_datetime'):
+            end_dt = parse_iso(job['end_datetime'])
+            if next_window > end_dt:
+                # Window won't reopen before job ends
+                return None
+        
+        return next_window
     else:
-        # Job has ended or other issue: return far future
-        # This shouldn't normally happen as completed jobs aren't scheduled
-        return now + timedelta(days=365)
+        # Job hasn't started or other reason
+        return None
 
