@@ -75,9 +75,11 @@ def calculate_next_window_start(reference_time: datetime, start_time: time, end_
     """Calculate when the time window will next open"""
     current_time = reference_time.time()
     
-    # Today's window start
-    from ..utils import ensure_timezone_aware
-    today_start = ensure_timezone_aware(datetime.combine(reference_time.date(), start_time))
+    # Today's window start - combine date with start_time and preserve timezone from reference_time
+    today_start = datetime.combine(reference_time.date(), start_time)
+    # Replace timezone with the timezone from reference_time to maintain consistency
+    if reference_time.tzinfo:
+        today_start = today_start.replace(tzinfo=reference_time.tzinfo)
     
     if is_time_in_window(current_time, start_time, end_time):
         # In window now, next start is tomorrow
@@ -95,6 +97,64 @@ def calculate_next_window_start(reference_time: datetime, start_time: time, end_
             return today_start
         else:
             return today_start - timedelta(days=1)
+
+
+def find_next_capture_in_window(job: dict, window_start: datetime, start_time: time, end_time: time, max_days: int = 30) -> Optional[datetime]:
+    """
+    Find the first capture on the grid that falls within a time window.
+    Will search across multiple days if needed.
+    
+    Args:
+        job: Job configuration
+        window_start: When the first window opens
+        start_time: Window start time (HH:MM)
+        end_time: Window end time (HH:MM)
+        max_days: Maximum number of days to search
+        
+    Returns:
+        First capture time within any window, or None if no captures fit before job ends
+    """
+    end_dt = parse_iso(job['end_datetime']) if job.get('end_datetime') else None
+    
+    # Try each day's window
+    for day_offset in range(max_days):
+        current_window_start = window_start + timedelta(days=day_offset)
+        
+        # Check if we've gone past the job's end date
+        if end_dt and current_window_start > end_dt:
+            return None
+        
+        # Calculate window end for this day
+        window_end_time = datetime.combine(current_window_start.date(), end_time)
+        if current_window_start.tzinfo:
+            window_end_time = window_end_time.replace(tzinfo=current_window_start.tzinfo)
+        
+        # If window crosses midnight
+        if end_time < start_time:
+            window_end_time += timedelta(days=1)
+        
+        # Start looking from just before the window opens
+        search_time = current_window_start - timedelta(seconds=1)
+        
+        # Look for captures within this specific day's window
+        for _ in range(1000):  # Safety limit per day
+            candidate = calculate_next_capture_on_grid(job, search_time)
+            
+            if candidate is None:
+                return None
+            
+            # If candidate is past this window, try next day
+            if candidate > window_end_time:
+                break
+            
+            # Check if candidate is within the window
+            if is_time_in_window(candidate.time(), start_time, end_time):
+                return candidate
+            
+            # Try next time slot
+            search_time = candidate
+    
+    return None
 
 
 def calculate_job_state(
@@ -144,10 +204,14 @@ def calculate_job_state(
                 start_time = parse_time_string(job['time_window_start'])
                 end_time = parse_time_string(job['time_window_end'])
                 
-                if is_time_in_window(pending_capture_time.time(), start_time, end_time):
+                # Must check BOTH: current time in window AND pending capture in window
+                current_in_window = is_time_in_window(reference_time.time(), start_time, end_time)
+                pending_in_window = is_time_in_window(pending_capture_time.time(), start_time, end_time)
+                
+                if current_in_window and pending_in_window:
                     return ('active', pending_capture_time, f'Pending capture at {to_iso(pending_capture_time)}')
                 else:
-                    # Pending capture is outside window - recalculate
+                    # Either current time or pending capture is outside window - recalculate
                     pass  # Fall through to recalculation
             else:
                 # No time window - pending capture is good
@@ -167,21 +231,24 @@ def calculate_job_state(
         start_time = parse_time_string(job['time_window_start'])
         end_time = parse_time_string(job['time_window_end'])
         
-        # Check if next capture is within the time window
-        if is_time_in_window(next_capture.time(), start_time, end_time):
-            # Next capture is in window - job is active
+        # Check if we are CURRENTLY in the time window
+        current_in_window = is_time_in_window(reference_time.time(), start_time, end_time)
+        next_capture_in_window = is_time_in_window(next_capture.time(), start_time, end_time)
+        
+        if current_in_window and next_capture_in_window:
+            # We're in the window now and next capture is also in window - job is active
             return ('active', next_capture, f'Active, next capture at {to_iso(next_capture)}')
         else:
-            # Next capture is outside window - calculate when window reopens
+            # Either we're outside window, or next capture is outside window
+            # Calculate when window next opens
             next_window_start = calculate_next_window_start(reference_time, start_time, end_time)
             
-            # Find first capture opportunity when window reopens
-            # The window start might not align with grid, so find the first grid slot >= window start
-            window_capture = calculate_next_capture_on_grid(job, next_window_start)
+            # Find first capture that falls within the window
+            window_capture = find_next_capture_in_window(job, next_window_start, start_time, end_time)
             
             if window_capture is None:
                 # No captures before job ends
-                return ('completed', None, 'Job ends before window reopens')
+                return ('completed', None, 'Job ends before next window')
             
             return ('sleeping', window_capture, f'Outside time window, next capture at {to_iso(window_capture)}')
     
