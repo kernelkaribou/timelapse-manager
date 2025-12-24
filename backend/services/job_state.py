@@ -130,14 +130,30 @@ def calculate_job_state(
     if reference_time < start_dt:
         return ('sleeping', start_dt, f'Job starts at {to_iso(start_dt)}')
     
-    # CRITICAL: Handle pending captures at boundary
-    # If there's a pending capture scheduled at or before end_datetime, and it's time to execute,
-    # keep the job active regardless of whether reference_time > end_datetime
-    if pending_capture_time and end_dt:
-        if pending_capture_time <= end_dt and pending_capture_time <= reference_time:
-            # This pending capture is valid and ready to execute
-            # Don't mark job as completed yet - let it capture first
-            return ('active', pending_capture_time, f'Executing boundary capture at {to_iso(pending_capture_time)}')
+    # CRITICAL: If there's a pending capture, keep it stable until it's executed
+    # This prevents the scheduler from constantly recalculating on every check
+    if pending_capture_time:
+        # Allow a small grace period (2x interval) for pending captures that just passed
+        # This ensures the scheduler has time to execute before we reschedule
+        grace_period = timedelta(seconds=job['interval_seconds'] * 2)
+        
+        if pending_capture_time > reference_time - grace_period:
+            # Pending capture is either in the future OR just recently passed (within grace period)
+            # Check time window if applicable
+            if job.get('time_window_enabled'):
+                start_time = parse_time_string(job['time_window_start'])
+                end_time = parse_time_string(job['time_window_end'])
+                
+                if is_time_in_window(pending_capture_time.time(), start_time, end_time):
+                    return ('active', pending_capture_time, f'Pending capture at {to_iso(pending_capture_time)}')
+                else:
+                    # Pending capture is outside window - recalculate
+                    pass  # Fall through to recalculation
+            else:
+                # No time window - pending capture is good
+                return ('active', pending_capture_time, f'Pending capture at {to_iso(pending_capture_time)}')
+        
+        # If we get here, pending capture is too old - recalculate
     
     # Calculate next capture on grid
     next_capture = calculate_next_capture_on_grid(job, reference_time)

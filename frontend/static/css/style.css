@@ -728,7 +728,22 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     padding: 1rem;
-    margin: 0.2rem 0;
+    margin: 1rem 0;
+    min-height: 60px;
+}
+
+.duration-estimate:empty {
+    display: none;
+}
+
+/* Info Box */
+.info-box {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--primary-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    color: var(--text-secondary);
 }
 
 .duration-estimate h4 {
@@ -877,8 +892,31 @@ body {
 }
 
 .datetime-picker-container input[type="date"] {
-    flex: 1;
-    min-width: 150px;
+    flex: 0 0 auto;
+    width: 110px;
+    min-width: 110px;
+    max-width: 110px;
+}
+
+.datetime-picker-container input[type="time"] {
+    flex: 0 0 auto;
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
+}
+
+/* Time picker container for time-only inputs (time windows) */
+.time-picker-container {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.time-picker-container input[type="time"] {
+    flex: 0 0 auto;
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
 }
 
 .datetime-picker-container .time-part {

@@ -8,8 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 from PIL import Image
 from ..database import get_db, dict_from_row
-from ..utils import get_now, to_iso
-from .time_window import ensure_timezone_aware
+from ..utils import get_now, to_iso, ensure_timezone_aware
 
 logger = logging.getLogger(__name__)
 

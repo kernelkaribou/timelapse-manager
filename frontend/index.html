@@ -129,31 +129,18 @@
                         <label>Start Date & Time *</label>
                         <div class="datetime-picker-container">
                             <input type="date" id="start_date" class="form-control" required>
-                            <div class="time-part">
-                                <select id="start_hour" class="form-control">
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="start_minute" class="form-control">
-                                </select>
-                            </div>
+                            <input type="time" id="start_time" class="form-control" required>
                         </div>
                         <input type="hidden" id="start_datetime">
-                        <small>24-hour format</small>
                     </div>
                     <div class="form-group flex-1">
                         <label>End Date & Time</label>
                         <div class="datetime-picker-container">
                             <input type="date" id="end_date" class="form-control">
-                            <div class="time-part">
-                                <select id="end_hour" class="form-control">
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="end_minute" class="form-control">
-                                </select>
-                            </div>
+                            <input type="time" id="end_time" class="form-control">
                         </div>
                         <input type="hidden" id="end_datetime">
-                        <small>Leave empty for ongoing capture (24-hour format)</small>
+                        <small>Leave empty for ongoing capture</small>
                     </div>
                 </div>
 
@@ -170,26 +157,18 @@
                         <div class="form-group flex-1">
                             <label>Window Start Time *</label>
                             <div class="time-picker-container">
-                                <select id="time_window_start_hour" class="form-control">
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="time_window_start_minute" class="form-control">
-                                </select>
+                                <input type="time" id="time_window_start_time" class="form-control">
                             </div>
                             <input type="hidden" id="time_window_start">
-                            <small>Start of daily capture window (24-hour format)</small>
+                            <small>Start of daily capture window</small>
                         </div>
                         <div class="form-group flex-1">
                             <label>Window End Time *</label>
                             <div class="time-picker-container">
-                                <select id="time_window_end_hour" class="form-control">
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="time_window_end_minute" class="form-control">
-                                </select>
+                                <input type="time" id="time_window_end_time" class="form-control">
                             </div>
                             <input type="hidden" id="time_window_end">
-                            <small>End of daily capture window (24-hour, can be next day)</small>
+                            <small>End of daily capture window (can be next day)</small>
                         </div>
                     </div>
                     <div style="padding: 0.75rem; background: #e3f2fd; border-left: 3px solid #2196f3; margin-bottom: 1rem; border-radius: 0.25rem;">
@@ -264,18 +243,7 @@
                     <small>Directory where the video file will be saved</small>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group flex-1">
-                        <label>Framerate (FPS) *</label>
-                        <input type="number" id="video_framerate" class="form-control" min="1" max="120" value="30" required onchange="updateVideoDurationEstimate()">
-                    </div>
-                    <div class="form-group flex-1">
-                        <label>Estimated Duration</label>
-                        <div class="duration-estimate" id="video-duration-estimate" style="margin-top: 0.2rem;"></div>
-                    </div>
-                </div>
-
-                <div class="form-row">
+              <div class="form-row">
                     <div class="form-group flex-1">
                         <label>Resolution *</label>
                         <select id="video_resolution" class="form-control" required onchange="toggleCustomResolution()">
@@ -308,6 +276,21 @@
                     </div>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label>Framerate (FPS) *</label>
+                        <input type="number" id="video_framerate" class="form-control" min="1" max="120" value="30" required onchange="updateVideoDurationEstimate()">
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Estimated Duration</label>
+                        <div class="duration-estimate" id="video-duration-estimate" style="margin-top: 0.2rem;"></div>
+                    </div>
+                </div>
+
+                <div id="available-range-info" class="info-box" style="margin-bottom: 1rem; display: none;">
+                    <strong>Capture Range:</strong> <span id="capture-time-range"></span>
+                </div>
+
                 <div class="form-group">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <input type="checkbox" id="use_range">
@@ -315,36 +298,27 @@
                     </div>
                 </div>
 
-                <div id="capture-range" class="form-row" style="display: none;">
-                    <div class="form-group flex-1">
-                        <label>Start Time</label>
-                        <div class="datetime-picker-container">
-                            <input type="date" id="video_start_date" class="form-control">
-                            <div class="time-part">
-                                <select id="video_start_hour" class="form-control">
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="video_start_minute" class="form-control">
-                                </select>
+                <div id="capture-range" style="display: none;">
+                    <div class="form-group">
+                        <label>Custom Time Range</label>
+                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <span style="color: var(--text-secondary); font-size: 0.9rem;">From:</span>
+                                <div class="datetime-picker-container">
+                                    <input type="date" id="video_start_date" class="form-control">
+                                    <input type="time" id="video_start_time" class="form-control">
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <span style="color: var(--text-secondary); font-size: 0.9rem;">To:</span>
+                                <div class="datetime-picker-container">
+                                    <input type="date" id="video_end_date" class="form-control">
+                                    <input type="time" id="video_end_time" class="form-control">
+                                </div>
                             </div>
                         </div>
                         <input type="hidden" id="start_time">
-                        <small>24-hour format</small>
-                    </div>
-                    <div class="form-group flex-1">
-                        <label>End Time</label>
-                        <div class="datetime-picker-container">
-                            <input type="date" id="video_end_date" class="form-control">
-                            <div class="time-part">
-                                <select id="video_end_hour" class="form-control">
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="video_end_minute" class="form-control">
-                                </select>
-                            </div>
-                        </div>
                         <input type="hidden" id="end_time">
-                        <small>24-hour format</small>
                     </div>
                 </div>
 

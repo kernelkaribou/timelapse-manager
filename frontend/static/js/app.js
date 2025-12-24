@@ -532,10 +532,20 @@ async function showJobDetails(jobId) {
 
                 <h4 style="margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--border-color);">Job Settings</h4>
 
+                <div class="form-group" style="margin-bottom: 1.5rem;">
+                    <label>Stream URL *</label>
+                    <input type="text" id="edit_url" class="form-control" value="${escapeHtml(job.url)}" required>
+                    <small style="color: var(--text-secondary);">HTTP or RTSP stream URL</small>
+                </div>
+
                 <div class="form-group" style="margin-bottom: 1rem;">
-                    <label>Capture Interval (seconds) *</label>
-                    <input type="number" id="edit_interval_seconds" class="form-control" value="${job.interval_seconds}" min="10" required>
-                    <small style="color: var(--text-secondary);">Minimum 10 seconds</small>
+                    <label>End Date & Time</label>
+                    <div class="datetime-picker-container">
+                        <input type="date" id="edit_end_date" class="form-control">
+                        <input type="time" id="edit_end_time" class="form-control">
+                    </div>
+                    <input type="hidden" id="edit_end_datetime">
+                    <small style="color: var(--text-secondary);">Leave empty for ongoing capture</small>
                 </div>
                 
                 <div class="form-group" style="margin-bottom: 1rem;">
@@ -551,58 +561,35 @@ async function showJobDetails(jobId) {
                         <div style="flex: 1;">
                             <label>Window Start Time</label>
                             <div class="time-picker-container">
-                                <select id="edit_time_window_start_hour" class="form-control">
-                                    <option value="">HH</option>
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="edit_time_window_start_minute" class="form-control">
-                                    <option value="">MM</option>
-                                </select>
+                                <input type="time" id="edit_time_window_start_time" class="form-control">
                             </div>
                             <input type="hidden" id="edit_time_window_start">
-                            <small style="color: var(--text-secondary); font-size: 0.75rem;">24-hour format</small>
                         </div>
                         <div style="flex: 1;">
                             <label>Window End Time</label>
                             <div class="time-picker-container">
-                                <select id="edit_time_window_end_hour" class="form-control">
-                                    <option value="">HH</option>
-                                </select>
-                                <span class="separator">:</span>
-                                <select id="edit_time_window_end_minute" class="form-control">
-                                    <option value="">MM</option>
-                                </select>
+                                <input type="time" id="edit_time_window_end_time" class="form-control">
                             </div>
                             <input type="hidden" id="edit_time_window_end">
-                            <small style="color: var(--text-secondary); font-size: 0.75rem;">24-hour format</small>
                         </div>
                     </div>
                     <small style="color: var(--text-secondary); display: block; margin-top: 0.5rem;">Can span midnight (e.g., 22:00 to 02:00)</small>
                 </div>
 
                 <div class="form-group" style="margin-bottom: 1rem;">
-                    <label>End Date & Time</label>
-                    <div class="datetime-picker-container">
-                        <input type="date" id="edit_end_date" class="form-control">
-                        <div class="time-part">
-                            <select id="edit_end_hour" class="form-control">
-                                <option value="">HH</option>
-                            </select>
-                            <span class="separator">:</span>
-                            <select id="edit_end_minute" class="form-control">
-                                <option value="">MM</option>
-                            </select>
-                        </div>
-                    </div>
-                    <input type="hidden" id="edit_end_datetime">
-                    <small style="color: var(--text-secondary);">Leave empty for ongoing capture (24-hour format)</small>
+                    <label>Capture Interval (seconds) *</label>
+                    <input type="number" id="edit_interval_seconds" class="form-control" value="${job.interval_seconds}" min="10" required>
+                    <small style="color: var(--text-secondary);">Minimum 10 seconds</small>
                 </div>
 
                 <div class="form-group" style="margin-bottom: 1.5rem;">
-                    <label>Stream URL *</label>
-                    <input type="text" id="edit_url" class="form-control" value="${escapeHtml(job.url)}" required>
-                    <small style="color: var(--text-secondary);">HTTP or RTSP stream URL</small>
+                    <label>Timelapse FPS *</label>
+                    <input type="number" id="edit_framerate" class="form-control" value="30" min="1" max="120" required>
+                    <small style="color: var(--text-secondary);">Frames per second for generated timelapse videos</small>
                 </div>
+
+                <div class="duration-estimate" id="edit-duration-estimate"></div>
+                <input type="hidden" id="edit_start_datetime" value="${job.start_datetime}">
                 
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 2px solid var(--border-color);">
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
@@ -739,13 +726,10 @@ function setupJobEditChangeTracking(originalJob) {
         'edit_interval_seconds',
         'edit_framerate',
         'edit_end_date',
-        'edit_end_hour',
-        'edit_end_minute',
+        'edit_end_time',
         'edit_time_window_enabled',
-        'edit_time_window_start_hour',
-        'edit_time_window_start_minute',
-        'edit_time_window_end_hour',
-        'edit_time_window_end_minute',
+        'edit_time_window_start_time',
+        'edit_time_window_end_time',
         'edit_url',
         'edit_stream_type'
     ];
@@ -757,6 +741,20 @@ function setupJobEditChangeTracking(originalJob) {
             field.addEventListener('input', enableSaveButton);
         }
     });
+
+    // Duration estimate watchers
+    const estimateFields = ['edit_interval_seconds', 'edit_framerate', 'edit_end_date', 'edit_end_time', 
+                            'edit_time_window_enabled', 'edit_time_window_start_time', 'edit_time_window_end_time'];
+    estimateFields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.addEventListener('change', updateEditDurationEstimate);
+            field.addEventListener('input', updateEditDurationEstimate);
+        }
+    });
+
+    // Trigger initial estimate
+    setTimeout(updateEditDurationEstimate, 100);
 }
 
 function confirmDisableJob(jobId, jobName) {
@@ -1271,23 +1269,47 @@ async function showProcessVideoModal(jobId, jobName) {
             const firstDate = new Date(timeRange.first_capture_time);
             const lastDate = new Date(timeRange.last_capture_time);
             
+            // Display available time range in 24-hour format
+            const rangeInfo = document.getElementById('available-range-info');
+            const rangeSpan = document.getElementById('capture-time-range');
+            
+            if (rangeInfo && rangeSpan) {
+                const formatOptions = { 
+                    year: 'numeric', 
+                    month: '2-digit', 
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                };
+                const firstFormatted = firstDate.toLocaleString('en-US', formatOptions);
+                const lastFormatted = lastDate.toLocaleString('en-US', formatOptions);
+                rangeSpan.textContent = `${firstFormatted} - ${lastFormatted}`;
+                rangeInfo.style.display = 'block';
+            }
+            
             // Set start time
             const startDateInput = document.getElementById('video_start_date');
-            const startHourSelect = document.getElementById('video_start_hour');
-            const startMinuteSelect = document.getElementById('video_start_minute');
+            const startTimeInput = document.getElementById('video_start_time');
             
             if (startDateInput) startDateInput.value = firstDate.toISOString().split('T')[0];
-            if (startHourSelect) startHourSelect.value = String(firstDate.getHours()).padStart(2, '0');
-            if (startMinuteSelect) startMinuteSelect.value = String(firstDate.getMinutes()).padStart(2, '0');
+            if (startTimeInput) {
+                const hours = String(firstDate.getHours()).padStart(2, '0');
+                const minutes = String(firstDate.getMinutes()).padStart(2, '0');
+                startTimeInput.value = `${hours}:${minutes}`;
+            }
             
             // Set end time
             const endDateInput = document.getElementById('video_end_date');
-            const endHourSelect = document.getElementById('video_end_hour');
-            const endMinuteSelect = document.getElementById('video_end_minute');
+            const endTimeInput = document.getElementById('video_end_time');
             
             if (endDateInput) endDateInput.value = lastDate.toISOString().split('T')[0];
-            if (endHourSelect) endHourSelect.value = String(lastDate.getHours()).padStart(2, '0');
-            if (endMinuteSelect) endMinuteSelect.value = String(lastDate.getMinutes()).padStart(2, '0');
+            if (endTimeInput) {
+                const hours = String(lastDate.getHours()).padStart(2, '0');
+                const minutes = String(lastDate.getMinutes()).padStart(2, '0');
+                endTimeInput.value = `${hours}:${minutes}`;
+            }
             
             // Trigger sync to update hidden inputs
             if (startDateInput) startDateInput.dispatchEvent(new Event('change'));
@@ -1717,52 +1739,59 @@ function formatDuration(seconds) {
     return `${s}s`;
 }
 
-async function updateDurationEstimate() {
-    const startDate = document.getElementById('start_datetime').value;
-    const endDate = document.getElementById('end_datetime').value;
-    const interval = parseInt(document.getElementById('interval_seconds').value);
-    const framerate = parseInt(document.getElementById('framerate').value) || 30;
-    const timeWindowEnabled = document.getElementById('time_window_enabled')?.checked || false;
-    const timeWindowStart = document.getElementById('time_window_start')?.value;
-    const timeWindowEnd = document.getElementById('time_window_end')?.value;
+// Universal Duration Estimator
+// Can be used for job creation, job editing, and anywhere else duration estimates are needed
+function calculateAndDisplayDuration(options) {
+    const {
+        startDateId,
+        endDateId,
+        intervalId,
+        framerateId,
+        timeWindowEnabledId,
+        timeWindowStartId,
+        timeWindowEndId,
+        displayElementId
+    } = options;
     
-    if (!startDate || !interval) return;
+    const startDate = document.getElementById(startDateId)?.value;
+    const endDate = document.getElementById(endDateId)?.value;
+    const interval = parseInt(document.getElementById(intervalId)?.value);
+    const framerate = parseInt(document.getElementById(framerateId)?.value) || 30;
+    const timeWindowEnabled = document.getElementById(timeWindowEnabledId)?.checked || false;
+    const timeWindowStart = document.getElementById(timeWindowStartId)?.value;
+    const timeWindowEnd = document.getElementById(timeWindowEndId)?.value;
+    const displayElement = document.getElementById(displayElementId);
     
-    const estimateDiv = document.getElementById('duration-estimate');
+    if (!displayElement || !startDate || !interval) {
+        if (displayElement) displayElement.innerHTML = '';
+        return;
+    }
     
     // Helper function to calculate captures with time window
     function calculateCaptures(durationSeconds) {
         if (!timeWindowEnabled || !timeWindowStart || !timeWindowEnd) {
-            // Simple calculation without time window
             return Math.floor(durationSeconds / interval);
         }
         
-        // For jobs with defined start/end times, calculate actual overlap
         if (endDate) {
             const jobStart = new Date(startDate);
             const jobEnd = new Date(endDate);
-            
-            // Parse time window
             const [startHour, startMin] = timeWindowStart.split(':').map(Number);
             const [endHour, endMin] = timeWindowEnd.split(':').map(Number);
             
-            // Check if window is same time (e.g., 10:15-10:15) or spans midnight
             const isSameTime = startHour === endHour && startMin === endMin;
             const windowSpansMidnight = startHour > endHour || (startHour === endHour && startMin > endMin);
             
             let totalCaptures = 0;
             let current = new Date(jobStart);
-            const maxIterations = 1000; // Safety limit
+            const maxIterations = 1000;
             let iterations = 0;
             
-            // Iterate through each day in the job duration
             while (current < jobEnd && iterations < maxIterations) {
                 iterations++;
-                
                 const currentDate = new Date(current);
                 const currentDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
                 
-                // Calculate window boundaries for this day
                 let dayWindowStart = new Date(currentDay);
                 dayWindowStart.setHours(startHour, startMin, 0, 0);
                 
@@ -1770,93 +1799,62 @@ async function updateDurationEstimate() {
                 dayWindowEnd.setHours(endHour, endMin, 0, 0);
                 
                 if (isSameTime) {
-                    // Same time window (e.g., 10:15-10:15) - one minute duration
-                    // Set end to one minute after start to capture within that minute
                     dayWindowEnd = new Date(dayWindowStart);
                     dayWindowEnd.setMinutes(dayWindowEnd.getMinutes() + 1);
                 } else if (windowSpansMidnight) {
-                    // If window spans midnight, end time is next day
                     dayWindowEnd.setDate(dayWindowEnd.getDate() + 1);
                 }
                 
-                // Skip if this window is entirely before current position
-                if (dayWindowEnd <= current) {
-                    current = new Date(currentDay);
-                    current.setDate(current.getDate() + 1);
-                    current.setHours(0, 0, 0, 0);
-                    continue;
+                const windowDuration = Math.min(dayWindowEnd, jobEnd) - Math.max(dayWindowStart, current);
+                if (windowDuration > 0) {
+                    totalCaptures += Math.floor((windowDuration / 1000) / interval);
                 }
                 
-                // Find overlap between [current, jobEnd] and [dayWindowStart, dayWindowEnd]
-                const overlapStart = new Date(Math.max(current.getTime(), dayWindowStart.getTime()));
-                const overlapEnd = new Date(Math.min(jobEnd.getTime(), dayWindowEnd.getTime()));
-                
-                if (overlapStart < overlapEnd) {
-                    // There's an overlap - calculate captures in this period
-                    const overlapSeconds = (overlapEnd - overlapStart) / 1000;
-                    totalCaptures += Math.floor(overlapSeconds / interval);
-                }
-                
-                // Move to next day
-                current = new Date(currentDay);
-                current.setDate(current.getDate() + 1);
-                current.setHours(0, 0, 0, 0);
-                
-                // If we've passed the job end, stop
-                if (current >= jobEnd) break;
+                current = new Date(dayWindowEnd);
             }
             
             return totalCaptures;
         } else {
-            // For ongoing jobs, use the fraction approach as an estimate
             const [startHour, startMin] = timeWindowStart.split(':').map(Number);
             const [endHour, endMin] = timeWindowEnd.split(':').map(Number);
             
-            const windowStartMinutes = startHour * 60 + startMin;
-            const windowEndMinutes = endHour * 60 + endMin;
-            
-            // Calculate window duration in minutes
-            let windowDurationMinutes;
-            const isSameTime = startHour === endHour && startMin === endMin;
-            
-            if (isSameTime) {
-                // Same time (e.g., 10:15-10:15) = 1 minute window
-                windowDurationMinutes = 1;
-            } else if (windowEndMinutes > windowStartMinutes) {
-                windowDurationMinutes = windowEndMinutes - windowStartMinutes;
+            let windowSeconds;
+            if (startHour === endHour && startMin === endMin) {
+                windowSeconds = 60;
+            } else if (startHour > endHour || (startHour === endHour && startMin > endMin)) {
+                const minutesUntilMidnight = (23 - startHour) * 60 + (60 - startMin);
+                const minutesAfterMidnight = endHour * 60 + endMin;
+                windowSeconds = (minutesUntilMidnight + minutesAfterMidnight) * 60;
             } else {
-                // Spans midnight
-                windowDurationMinutes = (24 * 60) - windowStartMinutes + windowEndMinutes;
+                const totalMinutes = (endHour - startHour) * 60 + (endMin - startMin);
+                windowSeconds = totalMinutes * 60;
             }
             
-            const windowDurationSeconds = windowDurationMinutes * 60;
-            const windowFraction = windowDurationSeconds / 86400;
-            const totalCapturesWithoutWindow = durationSeconds / interval;
-            
-            return Math.floor(totalCapturesWithoutWindow * windowFraction);
+            const capturesPerDay = Math.floor(windowSeconds / interval);
+            return Math.floor((durationSeconds / 86400) * capturesPerDay);
         }
     }
     
+    const windowNote = timeWindowEnabled && timeWindowStart && timeWindowEnd
+        ? ` <small style="color: var(--text-secondary);">(${timeWindowStart}-${timeWindowEnd} window)</small>`
+        : '';
+    
     if (endDate) {
-        // Calculate for defined time range
         const start = new Date(startDate);
         const end = new Date(endDate);
         const durationSeconds = (end - start) / 1000;
         const captures = calculateCaptures(durationSeconds);
         
-        const windowNote = timeWindowEnabled ? ` <small style="color: var(--text-secondary);">(with ${timeWindowStart}-${timeWindowEnd} time window)</small>` : '';
-        
-        estimateDiv.innerHTML = `
+        displayElement.innerHTML = `
             <h4>Estimated Video Duration${windowNote}</h4>
             <div class="duration-grid">
                 <div class="duration-item">
-                    <div class="duration-fps">${captures} captures @ ${framerate} FPS</div>
+                    <div class="duration-fps">${captures.toLocaleString()} captures @ ${framerate} FPS</div>
                     <div class="duration-time">${formatDuration(captures / framerate)}</div>
                 </div>
             </div>
         `;
     } else {
-        // Show estimates for common durations in horizontal table format
         const durations = [
             { label: '1 Hour', seconds: 3600 },
             { label: '1 Day', seconds: 86400 },
@@ -1864,12 +1862,11 @@ async function updateDurationEstimate() {
             { label: '1 Month', seconds: 2592000 }
         ];
         
-        const windowNote = timeWindowEnabled ? ` <small style="color: var(--text-secondary);">(with ${timeWindowStart}-${timeWindowEnd} time window)</small>` : '';
-        estimateDiv.innerHTML = `<h4>Estimated Video Duration @ ${framerate} FPS (Ongoing Job)${windowNote}</h4>`;
+        displayElement.innerHTML = `<h4>Estimated Video Duration @ ${framerate} FPS (Ongoing)${windowNote}</h4>`;
         
         durations.forEach(dur => {
             const captures = calculateCaptures(dur.seconds);
-            estimateDiv.innerHTML += `
+            displayElement.innerHTML += `
                 <div class="duration-row">
                     <strong>${dur.label}</strong>
                     <div class="duration-table">
@@ -1888,10 +1885,41 @@ async function updateDurationEstimate() {
     }
 }
 
-// Trigger initial estimate
-document.getElementById('start_datetime')?.addEventListener('change', updateDurationEstimate);
-document.getElementById('end_datetime')?.addEventListener('change', updateDurationEstimate);
-document.getElementById('framerate')?.addEventListener('change', updateDurationEstimate);
+// Job Creation Duration Estimator - calls universal calculator
+function updateDurationEstimate() {
+    calculateAndDisplayDuration({
+        startDateId: 'start_datetime',
+        endDateId: 'end_datetime',
+        intervalId: 'interval_seconds',
+        framerateId: 'framerate',
+        timeWindowEnabledId: 'time_window_enabled',
+        timeWindowStartId: 'time_window_start',
+        timeWindowEndId: 'time_window_end',
+        displayElementId: 'duration-estimate'
+    });
+}
+
+// Job Edit Duration Estimator - calls universal calculator
+function updateEditDurationEstimate() {
+    calculateAndDisplayDuration({
+        startDateId: 'edit_start_datetime',
+        endDateId: 'edit_end_datetime',
+        intervalId: 'edit_interval_seconds',
+        framerateId: 'edit_framerate',
+        timeWindowEnabledId: 'edit_time_window_enabled',
+        timeWindowStartId: 'edit_time_window_start',
+        timeWindowEndId: 'edit_time_window_end',
+        displayElementId: 'edit-duration-estimate'
+    });
+}
+
+// Trigger initial estimate for job creation
+const jobCreationEstimateFields = ['start_datetime', 'end_datetime', 'interval_seconds', 'framerate', 
+                                   'time_window_enabled', 'time_window_start', 'time_window_end'];
+jobCreationEstimateFields.forEach(fieldId => {
+    document.getElementById(fieldId)?.addEventListener('change', updateDurationEstimate);
+    document.getElementById(fieldId)?.addEventListener('input', updateDurationEstimate);
+});
 
 // Close modals on outside click
 window.onclick = function(event) {
@@ -2414,57 +2442,39 @@ function populateMinuteOptions(selectId) {
 }
 
 function initializeTimePickers() {
-    // Time window pickers
-    populateHourOptions('time_window_start_hour');
-    populateHourOptions('time_window_end_hour');
-    populateMinuteOptions('time_window_start_minute');
-    populateMinuteOptions('time_window_end_minute');
-    
-    // DateTime pickers for job creation
-    populateHourOptions('start_hour');
-    populateHourOptions('end_hour');
-    populateMinuteOptions('start_minute');
-    populateMinuteOptions('end_minute');
-    
-    // DateTime pickers for video processing
-    populateHourOptions('video_start_hour');
-    populateHourOptions('video_end_hour');
-    populateMinuteOptions('video_start_minute');
-    populateMinuteOptions('video_end_minute');
-    
-    // Setup sync for time windows
-    setupTimePickerSync('time_window_start');
-    setupTimePickerSync('time_window_end');
-    
-    // Setup sync for datetime pickers
-    setupDateTimePickerSync('start');
-    setupDateTimePickerSync('end');
-    setupDateTimePickerSync('video_start', 'start_time');
-    setupDateTimePickerSync('video_end', 'end_time');
+    // Setup universal time input sync for all time pickers
+    // Used consistently across all forms: job creation, editing, and video processing
+    setupTimeInputSync('time_window_start');
+    setupTimeInputSync('time_window_end');
+    setupDateTimePickerSyncWithTimeInput('start', 'start_datetime');
+    setupDateTimePickerSyncWithTimeInput('end', 'end_datetime');
+    setupDateTimePickerSyncWithTimeInput('video_start', 'start_time');
+    setupDateTimePickerSyncWithTimeInput('video_end', 'end_time');
     
     // Set default start time to now
     setDefaultStartTime();
 }
 
-function setupTimePickerSync(baseId) {
-    const hourSelect = document.getElementById(`${baseId}_hour`);
-    const minuteSelect = document.getElementById(`${baseId}_minute`);
+// Universal time input sync function for time-only fields (no date)
+// Used for time window start/end times
+function setupTimeInputSync(baseId) {
+    const timeInput = document.getElementById(`${baseId}_time`);
     const hiddenInput = document.getElementById(baseId);
     
-    if (!hourSelect || !minuteSelect || !hiddenInput) return;
+    if (!timeInput || !hiddenInput) return;
     
     const syncValue = () => {
-        const hour = hourSelect.value;
-        const minute = minuteSelect.value;
-        if (hour && minute) {
-            hiddenInput.value = `${hour}:${minute}`;
+        const time = timeInput.value;
+        if (time) {
+            hiddenInput.value = time;
         } else {
             hiddenInput.value = '';
         }
+        // Dispatch change event so listeners on hidden input get notified
+        hiddenInput.dispatchEvent(new Event('change'));
     };
     
-    hourSelect.addEventListener('change', syncValue);
-    minuteSelect.addEventListener('change', syncValue);
+    timeInput.addEventListener('change', syncValue);
 }
 
 function setupDateTimePickerSync(baseId, hiddenId) {
@@ -2494,64 +2504,83 @@ function setupDateTimePickerSync(baseId, hiddenId) {
     minuteSelect.addEventListener('change', syncValue);
 }
 
+// Universal datetime picker setup function with time input
+// Provides consistent behavior across job creation, editing, and video processing
+// Syncs date + time inputs to a hidden ISO datetime field
+function setupDateTimePickerSyncWithTimeInput(baseId, hiddenId) {
+    const dateInput = document.getElementById(`${baseId}_date`);
+    const timeInput = document.getElementById(`${baseId}_time`);
+    const hiddenInput = document.getElementById(hiddenId);
+    
+    if (!dateInput || !timeInput || !hiddenInput) return;
+    
+    const syncValue = () => {
+        const date = dateInput.value;
+        const time = timeInput.value;
+        
+        if (date && time) {
+            hiddenInput.value = `${date}T${time}`;
+        } else {
+            hiddenInput.value = '';
+        }
+        // Dispatch change event so listeners on hidden input get notified
+        hiddenInput.dispatchEvent(new Event('change'));
+    };
+    
+    dateInput.addEventListener('change', syncValue);
+    timeInput.addEventListener('change', syncValue);
+}
+
 function setDefaultStartTime() {
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
-    const hour = now.getHours().toString().padStart(2, '0');
-    const minute = now.getMinutes().toString().padStart(2, '0');
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const timeStr = `${hours}:${minutes}`;
     
     const dateInput = document.getElementById('start_date');
-    const hourSelect = document.getElementById('start_hour');
-    const minuteSelect = document.getElementById('start_minute');
+    const timeInput = document.getElementById('start_time');
     
     if (dateInput) dateInput.value = dateStr;
-    if (hourSelect) hourSelect.value = hour;
-    if (minuteSelect) minuteSelect.value = minute;
+    if (timeInput) timeInput.value = timeStr;
     
     // Trigger sync
     if (dateInput) dateInput.dispatchEvent(new Event('change'));
 }
 
 function initializeEditTimePickers(job) {
-    // Populate hour and minute options for edit modal
-    populateHourOptions('edit_time_window_start_hour');
-    populateHourOptions('edit_time_window_end_hour');
-    populateHourOptions('edit_end_hour');
+    // Setup universal time input sync for time windows
+    setupTimeInputSync('edit_time_window_start');
+    setupTimeInputSync('edit_time_window_end');
     
-    populateMinuteOptions('edit_time_window_start_minute');
-    populateMinuteOptions('edit_time_window_end_minute');
-    populateMinuteOptions('edit_end_minute');
-    
-    // Setup sync for time windows
-    setupTimePickerSync('edit_time_window_start');
-    setupTimePickerSync('edit_time_window_end');
-    
-    // Setup sync for end datetime
-    setupDateTimePickerSync('edit_end', 'edit_end_datetime');
+    // Setup universal datetime picker for end datetime
+    setupDateTimePickerSyncWithTimeInput('edit_end', 'edit_end_datetime');
     
     // Set initial values for time window if enabled
     if (job.time_window_enabled && job.time_window_start && job.time_window_end) {
-        setTimePickerValue('edit_time_window_start', job.time_window_start);
-        setTimePickerValue('edit_time_window_end', job.time_window_end);
+        setTimeInputValue('edit_time_window_start', job.time_window_start);
+        setTimeInputValue('edit_time_window_end', job.time_window_end);
     }
     
     // Set initial values for end datetime if present
     if (job.end_datetime) {
-        setDateTimePickerValue('edit_end', job.end_datetime, 'edit_end_datetime');
+        setDateTimePickerValueWithTimeInput('edit_end', job.end_datetime, 'edit_end_datetime');
     }
 }
 
-function setTimePickerValue(baseId, timeString) {
+// Universal function for setting time input values
+// Used for time window start/end times
+function setTimeInputValue(baseId, timeString) {
     if (!timeString) return;
     
-    const [hour, minute] = timeString.split(':');
-    const hourSelect = document.getElementById(`${baseId}_hour`);
-    const minuteSelect = document.getElementById(`${baseId}_minute`);
+    const timeInput = document.getElementById(`${baseId}_time`);
     
-    if (hourSelect && minuteSelect) {
-        hourSelect.value = hour;
-        minuteSelect.value = minute;
-        hourSelect.dispatchEvent(new Event('change'));
+    if (timeInput) {
+        timeInput.value = timeString;
+        timeInput.dispatchEvent(new Event('change'));
     }
 }
 
@@ -2559,7 +2588,11 @@ function setDateTimePickerValue(baseId, datetimeString, hiddenId) {
     if (!datetimeString) return;
     
     const dt = new Date(datetimeString);
-    const dateStr = dt.toISOString().split('T')[0];
+    // Use local date components to avoid UTC conversion issues
+    const year = dt.getFullYear();
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
     const hour = dt.getHours().toString().padStart(2, '0');
     const minute = dt.getMinutes().toString().padStart(2, '0');
     
@@ -2570,6 +2603,31 @@ function setDateTimePickerValue(baseId, datetimeString, hiddenId) {
     if (dateInput) dateInput.value = dateStr;
     if (hourSelect) hourSelect.value = hour;
     if (minuteSelect) minuteSelect.value = minute;
+    
+    // Trigger sync
+    if (dateInput) dateInput.dispatchEvent(new Event('change'));
+}
+
+// Universal function for setting datetime picker values with time inputs
+// Used consistently across job creation, editing, and video processing
+function setDateTimePickerValueWithTimeInput(baseId, datetimeString, hiddenId) {
+    if (!datetimeString) return;
+    
+    const dt = new Date(datetimeString);
+    // Use local date components to avoid UTC conversion issues
+    const year = dt.getFullYear();
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    const hour = dt.getHours().toString().padStart(2, '0');
+    const minute = dt.getMinutes().toString().padStart(2, '0');
+    const timeStr = `${hour}:${minute}`;
+    
+    const dateInput = document.getElementById(`${baseId}_date`);
+    const timeInput = document.getElementById(`${baseId}_time`);
+    
+    if (dateInput) dateInput.value = dateStr;
+    if (timeInput) timeInput.value = timeStr;
     
     // Trigger sync
     if (dateInput) dateInput.dispatchEvent(new Event('change'));

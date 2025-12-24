@@ -106,22 +106,33 @@ class CaptureScheduler:
         pending = parse_iso(job['next_scheduled_capture_at']) if job.get('next_scheduled_capture_at') else None
         
         # Calculate correct state with full context
+        # Important: passing pending ensures we don't recalculate next capture if one is already scheduled
         new_status, next_capture, reason = calculate_job_state(job, now, pending)
         
-        # Update database if status changed
-        if new_status != current_status:
+        # Update database if status changed OR if next_capture changed
+        next_capture_iso = to_iso(next_capture) if next_capture else None
+        current_next_capture_iso = job.get('next_scheduled_capture_at')
+        
+        if new_status != current_status or next_capture_iso != current_next_capture_iso:
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE jobs SET status = ?, warning_message = NULL, updated_at = ? WHERE id = ?",
-                    (new_status, to_iso(now), job_id)
+                    "UPDATE jobs SET status = ?, next_scheduled_capture_at = ?, warning_message = NULL, updated_at = ? WHERE id = ?",
+                    (new_status, next_capture_iso, to_iso(now), job_id)
                 )
             job['status'] = new_status
-            logger.info(f"Job {job_id} ({job['name']}) status: {current_status} -> {new_status} - {reason}")
+            job['next_scheduled_capture_at'] = next_capture_iso
+            
+            if new_status != current_status:
+                logger.info(f"Job {job_id} ({job['name']}) status: {current_status} -> {new_status} - {reason}")
+            if next_capture_iso != current_next_capture_iso:
+                logger.debug(f"Job {job_id} ({job['name']}) next_scheduled_capture_at updated: {current_next_capture_iso} -> {next_capture_iso}")
         
-        # Update in-memory queue
-        if new_status == 'active' and next_capture:
-            self.scheduled_captures[job_id] = next_capture
+        # Update in-memory queue with the value from database
+        db_next_capture = parse_iso(job['next_scheduled_capture_at']) if job.get('next_scheduled_capture_at') else None
+        
+        if new_status == 'active' and db_next_capture:
+            self.scheduled_captures[job_id] = db_next_capture
         else:
             self.scheduled_captures.pop(job_id, None)
     
