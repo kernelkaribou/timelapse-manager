@@ -33,7 +33,7 @@ class JobCreate(BaseModel):
     start_datetime: datetime
     end_datetime: Optional[datetime] = None
     interval_seconds: int = Field(..., ge=10, description="Capture interval in seconds")
-    framerate: int = Field(default=30, gt=0, le=120)
+    framerate: int = Field(default=30, gt=0)
     capture_path: Optional[str] = None
     naming_pattern: Optional[str] = None
     time_window_enabled: bool = Field(default=False, description="Enable daily time window for captures")
@@ -81,7 +81,7 @@ class JobUpdate(BaseModel):
     start_datetime: Optional[datetime] = None
     end_datetime: Optional[datetime] = None
     interval_seconds: Optional[int] = Field(None, ge=10)
-    framerate: Optional[int] = Field(None, gt=0, le=120)
+    framerate: Optional[int] = Field(None, gt=0)
     status: Optional[JobStatus] = None
     time_window_enabled: Optional[bool] = None
     time_window_start: Optional[str] = None
@@ -108,6 +108,7 @@ class JobResponse(BaseModel):
     time_window_end: Optional[str] = None
     next_scheduled_capture_at: Optional[str] = None  # New: scheduled capture time from DB
     next_capture_at: Optional[str] = None  # Calculated field from enrich function
+    latest_capture: Optional[Dict[str, Any]] = None  # Latest capture info
     created_at: str
     updated_at: str
 
@@ -115,16 +116,31 @@ class JobResponse(BaseModel):
 class CaptureResponse(BaseModel):
     id: int
     job_id: int
+    job_name: Optional[str] = None
     file_path: str
     file_size: int
     captured_at: str
+    thumbnail_path: Optional[str] = None
+    has_thumbnail: bool = False
+
+
+class CaptureListResponse(BaseModel):
+    captures: List[CaptureResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class CaptureDeleteRequest(BaseModel):
+    capture_ids: List[int]
 
 
 class VideoCreate(BaseModel):
     job_id: int
     name: str
     resolution: str = Field(default="1920x1080", pattern=r"^\d+x\d+$")
-    framerate: int = Field(default=30, gt=0, le=120)
+    framerate: int = Field(default=30, gt=0)
     quality: str = Field(default="high", pattern=r"^(low|medium|high|lossless)$")
     output_path: Optional[str] = None
     start_capture_id: Optional[int] = None

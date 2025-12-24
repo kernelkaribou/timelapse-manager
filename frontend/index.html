@@ -15,6 +15,7 @@
             </div>
             <div class="nav-links">
                 <a href="#" data-view="jobs" class="nav-link active">Jobs</a>
+                <a href="#" data-view="captures" class="nav-link">Captures</a>
                 <a href="#" data-view="videos" class="nav-link">Timelapses</a>
                 <a href="#" data-view="settings" class="nav-link settings-link" title="Settings">
                     <svg width="20" height="20" viewBox="0 0 306.256 306.256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -43,6 +44,62 @@
                     <h2>Timelapses</h2>
                 </div>
                 <div id="videos-list" class="videos-grid"></div>
+            </div>
+
+            <!-- Captures View -->
+            <div id="captures-view" class="view">
+                <div class="view-header">
+                    <h2>Captures</h2>
+                </div>
+                
+                <!-- Filters -->
+                <div class="captures-filters">
+                    <div class="filter-group">
+                        <label>Sort:</label>
+                        <select id="captures-sort-order" class="form-control" onchange="applyCaptureSortAndFilter()" style="width: 100px;">
+                            <option value="asc">Oldest First</option>
+                            <option value="desc">Newest First</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Show:</label>
+                        <select id="captures-page-size" class="form-control" onchange="applyCaptureSortAndFilter()" style="width: 70px; min-width: 70px;">
+                            <option value="16" selected>16</option>
+                            <option value="32">32</option>
+                            <option value="64">64</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Job:</label>
+                        <select id="captures-job-filter" class="form-control" onchange="applyCaptureSortAndFilter()">
+                            <option value="">All Jobs</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>From:</label>
+                        <input type="datetime-local" id="captures-start-time" class="form-control" onchange="applyCaptureSortAndFilter()">
+                    </div>
+                    <div class="filter-group">
+                        <label>To:</label>
+                        <input type="datetime-local" id="captures-end-time" class="form-control" onchange="applyCaptureSortAndFilter()">
+                    </div>
+                    <button class="btn-icon" onclick="clearCaptureFilters()" title="Clear filters" style="padding: 0.5rem 0.6rem; background: #6c757d; color: white; border-radius: 0.25rem; margin-left: 0.5rem;">
+                        ✕
+                    </button>
+                </div>
+
+                <!-- Selection controls -->
+                <div class="captures-selection-controls" id="captures-selection-controls" style="display: none;">
+                    <span id="captures-selected-count">0 selected</span>
+                    <button class="btn btn-secondary" id="toggle-selection-btn" onclick="toggleSelectAllVisible()">Select Visible</button>
+                    <button class="btn btn-danger" onclick="deleteSelectedCaptures()">Delete Selected</button>
+                </div>
+
+                <!-- Grid -->
+                <div id="captures-grid" class="captures-grid"></div>
+
+                <!-- Pagination -->
+                <div class="pagination" id="captures-pagination"></div>
             </div>
 
             <!-- Settings View -->
@@ -185,8 +242,9 @@
                         <small>Minimum 10 seconds</small>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Target Framerate *</label>
-                        <input type="number" id="framerate" class="form-control" min="1" max="120" value="30" required onchange="updateDurationEstimate()">
+                        <label>Target Framerate</label>
+                        <input type="number" id="framerate" class="form-control" min="1" max="120" value="30">
+                        <small style="color: var(--text-secondary);">Frames per second for generated timelapse videos, for estimation purposes only</small>
                     </div>
                 </div>
 
@@ -279,7 +337,7 @@
                 <div class="form-row">
                     <div class="form-group flex-1">
                         <label>Framerate (FPS) *</label>
-                        <input type="number" id="video_framerate" class="form-control" min="1" max="120" value="30" required onchange="updateVideoDurationEstimate()">
+                        <input type="number" id="video_framerate" class="form-control" min="1" value="30" required>
                     </div>
                     <div class="form-group flex-1">
                         <label>Estimated Duration</label>
@@ -355,6 +413,43 @@
             </div>
             <div id="maintenance-content" style="padding: 1.5rem;">
                 <!-- Content will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Capture Preview Modal -->
+    <div id="capture-preview-modal" class="modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h3>Capture Details</h3>
+                <button class="modal-close" onclick="closeCapturePreview()">&times;</button>
+            </div>
+            <div style="padding: 1.5rem;">
+                <div style="text-align: center; margin-bottom: 1rem;">
+                    <img id="capture-preview-image" style="max-width: 100%; max-height: 60vh; background: #000;">
+                </div>
+                <div id="capture-preview-details" class="capture-details">
+                    <div class="detail-row">
+                        <strong>Job:</strong>
+                        <span id="capture-detail-job"></span>
+                    </div>
+                    <div class="detail-row">
+                        <strong>Captured:</strong>
+                        <span id="capture-detail-time"></span>
+                    </div>
+                    <div class="detail-row">
+                        <strong>Size:</strong>
+                        <span id="capture-detail-size"></span>
+                    </div>
+                    <div class="detail-row">
+                        <strong>Path:</strong>
+                        <span id="capture-detail-path" style="font-size: 0.9em; word-break: break-all;"></span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+                    <button class="btn btn-secondary" onclick="closeCapturePreview()">Close</button>
+                    <button class="btn btn-danger" onclick="deleteSingleCapture()">Delete</button>
+                </div>
             </div>
         </div>
     </div>

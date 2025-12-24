@@ -151,8 +151,24 @@ async def list_jobs(
                 (limit, offset)
             )
         
-        jobs = [dict_from_row(row) for row in cursor.fetchall()]
-        return [enrich_job_with_next_capture(job) for job in jobs]
+        jobs = []
+        for row in cursor.fetchall():
+            job = dict_from_row(row)
+            
+            # Get latest capture for this job
+            cursor.execute(
+                "SELECT * FROM captures WHERE job_id = ? ORDER BY captured_at DESC LIMIT 1",
+                (job['id'],)
+            )
+            latest_capture_row = cursor.fetchone()
+            if latest_capture_row:
+                job['latest_capture'] = dict_from_row(latest_capture_row)
+            else:
+                job['latest_capture'] = None
+            
+            jobs.append(enrich_job_with_next_capture(job))
+        
+        return jobs
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -166,7 +182,20 @@ async def get_job(job_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        return enrich_job_with_next_capture(dict_from_row(row))
+        job = dict_from_row(row)
+        
+        # Get latest capture for this job
+        cursor.execute(
+            "SELECT * FROM captures WHERE job_id = ? ORDER BY captured_at DESC LIMIT 1",
+            (job_id,)
+        )
+        latest_capture_row = cursor.fetchone()
+        if latest_capture_row:
+            job['latest_capture'] = dict_from_row(latest_capture_row)
+        else:
+            job['latest_capture'] = None
+        
+        return enrich_job_with_next_capture(job)
 
 
 

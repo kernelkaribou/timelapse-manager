@@ -9,6 +9,7 @@ import logging
 from ..database import get_db
 from .. import config
 from ..utils import get_now, to_iso
+from .thumbnail_generator import generate_thumbnail
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,9 @@ def capture_image(job: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         
         if success and os.path.exists(output_path):
             file_size = os.path.getsize(output_path)
+            
+            # Generate thumbnail for the captured image
+            generate_thumbnail(output_path)
             
             # Record capture in database
             with get_db() as conn:

@@ -342,25 +342,14 @@ function switchView(view, pushState = true) {
     if (view === 'jobs') loadJobs();
     if (view === 'videos') loadVideos();
     if (view === 'settings') loadSettings();
+    if (view === 'captures') loadCaptures();
 }
 
 // Jobs
 async function loadJobs() {
     try {
         const jobs = await apiRequest('/jobs/');
-        
-        // Get latest captures for each job
-        const jobsWithCaptures = await Promise.all(jobs.map(async (job) => {
-            try {
-                const captures = await apiRequest('/captures/', { query: { job_id: job.id, limit: 1 } });
-                job.latest_capture = captures.length > 0 ? captures[0] : null;
-            } catch (error) {
-                job.latest_capture = null;
-            }
-            return job;
-        }));
-        
-        renderJobs(jobsWithCaptures);
+        renderJobs(jobs);
     } catch (error) {
         console.error('Failed to load jobs:', error);
     }
@@ -381,7 +370,7 @@ function renderJobs(jobs) {
     
     container.innerHTML = jobs.map(job => {
         const thumbnailHtml = job.latest_capture 
-            ? `<div class="job-thumbnail" style="background-image: url('${API_BASE}/captures/${job.latest_capture.id}/image'); background-size: cover; background-position: center; height: 120px; border-radius: 0.5rem; margin-bottom: 1rem;"></div>`
+            ? `<div class="job-thumbnail" style="background-image: url('${API_BASE}/captures/${job.latest_capture.id}/thumbnail'); background-size: cover; background-position: center; height: 120px; border-radius: 0.5rem; margin-bottom: 1rem;"></div>`
             : `<div class="job-thumbnail" style="background: var(--border-color); height: 120px; border-radius: 0.5rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">No captures yet</div>`;
         
         // Determine status display
@@ -437,10 +426,14 @@ function renderJobs(jobs) {
                 ${timeWindowInfo}
                 ${job.start_datetime ? `<div><strong>Start:</strong> ${formatDateTimeNoSeconds(job.start_datetime)}</div>` : ''}
                 ${job.end_datetime ? `<div><strong>End:</strong> ${formatDateTimeNoSeconds(job.end_datetime)}</div>` : '<div><strong>Ongoing capture</strong></div>'}
-                ${lastCaptureInfo}
                 ${nextCaptureInfo}
+                ${lastCaptureInfo}
                 <div style="margin-top: 0.5rem;">
-                    <span class="stat-inline">${job.capture_count} captures</span> · 
+                    <a href="#" onclick="event.stopPropagation(); viewJobCaptures(${job.id}); return false;" 
+                       style="color: var(--primary-color); text-decoration: underline; font-weight: 500;"
+                       title="View captures">
+                        ${job.capture_count} captures
+                    </a> · 
                     <span class="stat-inline">${formatBytes(job.storage_size)}</span>
                 </div>
             </div>
@@ -451,9 +444,9 @@ function renderJobs(jobs) {
 
 async function showJobDetails(jobId) {
     try {
-        const [job, captures] = await Promise.all([
-            fetch(`${API_BASE}/jobs/${jobId}`).then(r => r.json()),
-            fetch(`${API_BASE}/captures/?job_id=${jobId}&limit=1`).then(r => r.json())
+        const [job, capturesData] = await Promise.all([
+            apiRequest(`/jobs/${jobId}`),
+            apiRequest('/captures/', { query: { job_id: jobId, page: 1, page_size: 1 } })
         ]);
         
         const modal = document.getElementById('job-details-modal');
@@ -464,10 +457,10 @@ async function showJobDetails(jobId) {
         title.textContent = `${job.name} - Details`;
         
         let latestImageHtml = '';
-        if (captures.length > 0) {
+        if (capturesData.captures && capturesData.captures.length > 0) {
             latestImageHtml = `
                 <div style="margin: 1.5rem 0;">
-                    <img src="${API_BASE}/captures/${captures[0].id}/image" alt="Latest capture" style="max-width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);">
+                    <img src="${API_BASE}/captures/${capturesData.captures[0].id}/image" alt="Latest capture" style="max-width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);">
                 </div>
             `;
         }
@@ -508,8 +501,8 @@ async function showJobDetails(jobId) {
         
         // Last capture info
         let lastCaptureHtml = '';
-        if (captures.length > 0) {
-            lastCaptureHtml = `<div><strong>Last Capture:</strong> ${formatDateTime(captures[0].captured_at)}</div>`;
+        if (capturesData.captures && capturesData.captures.length > 0) {
+            lastCaptureHtml = `<div><strong>Last Capture:</strong> ${formatDateTime(capturesData.captures[0].captured_at)}</div>`;
         } else {
             lastCaptureHtml = `<div><strong>Last Capture:</strong> No captures yet</div>`;
         }
@@ -544,13 +537,18 @@ async function showJobDetails(jobId) {
                 <div class="job-info" style="margin-bottom: 1rem;">
                     <div><strong>Status:</strong> <span class="job-status ${statusClass}">${statusLabel}</span></div>
                     <div><strong>Start:</strong> ${formatDateTimeNoSeconds(job.start_datetime)}</div>
-                    ${lastCaptureHtml}
                     ${nextCaptureHtml}
+                    ${lastCaptureHtml}
                 </div>
                 
                 <div class="job-info" style="margin-bottom: 1.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <strong>Captures:</strong> ${job.capture_count}
+                        <strong>Captures:</strong> 
+                        <a href="#" onclick="event.stopPropagation(); viewJobCaptures(${job.id}); return false;" 
+                           style="color: var(--primary-color); text-decoration: none;"
+                           title="View captures">
+                            ${job.capture_count}
+                        </a>
                         <button class="btn-icon" onclick="event.stopPropagation(); closeModal('job-details-modal'); startMaintenance(${job.id}, '${escapeHtml(job.name)}')" title="Maintenance" style="padding: 0.25rem;">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
@@ -614,9 +612,9 @@ async function showJobDetails(jobId) {
                 </div>
 
                 <div class="form-group" style="margin-bottom: 1.5rem;">
-                    <label>Timelapse FPS *</label>
+                    <label>Timelapse FPS</label>
                     <input type="number" id="edit_framerate" class="form-control" value="30" min="1" max="120" required>
-                    <small style="color: var(--text-secondary);">Frames per second for generated timelapse videos</small>
+                    <small style="color: var(--text-secondary);">Frames per second for generated timelapse videos, for estimation purposes only</small>
                 </div>
 
                 <div class="duration-estimate" id="edit-duration-estimate"></div>
@@ -681,6 +679,12 @@ async function createJob(event) {
         time_window_start: {},
         time_window_end: {}
     });
+    
+    // Validate framerate
+    if (!values.framerate || values.framerate < 1 || values.framerate > 120) {
+        showNotification('Framerate must be between 1 and 120 FPS', 'error');
+        return;
+    }
     
     // Auto-detect stream type from URL
     const stream_type = values.job_url.toLowerCase().startsWith('rtsp://') ? 'rtsp' : 'http';
@@ -755,7 +759,6 @@ function setupJobEditChangeTracking(originalJob) {
     // Track changes on all editable fields
     const fields = [
         'edit_interval_seconds',
-        'edit_framerate',
         'edit_end_date',
         'edit_end_time',
         'edit_time_window_enabled',
@@ -1549,11 +1552,19 @@ async function processVideo(event) {
         resolution = `${width}x${height}`;
     }
     
+    const framerate = parseInt(document.getElementById('video_framerate').value);
+    
+    // Validate framerate
+    if (!framerate || framerate < 1) {
+        showNotification('Framerate must be at least 1 FPS', 'error');
+        return;
+    }
+    
     const formData = {
         job_id: parseInt(document.getElementById('process_job_id').value),
         name: document.getElementById('video_name').value,
         resolution: resolution,
-        framerate: parseInt(document.getElementById('video_framerate').value),
+        framerate: framerate,
         quality: document.getElementById('video_quality').value,
         output_path: document.getElementById('video_output_path').value.trim() || null,
         start_time: useRange ? document.getElementById('video_start_datetime').value : null,
@@ -2845,3 +2856,397 @@ async function regenerateApiKey() {
         }
     });
 }
+
+// =============================================================================
+// Captures Management
+// =============================================================================
+
+let capturesState = {
+    currentPage: 1,
+    pageSize: 16,
+    sortOrder: 'asc',
+    jobFilter: null,
+    startTime: null,
+    endTime: null,
+    selectedCaptures: new Set(),
+    currentCaptureId: null
+};
+
+async function loadCaptures() {
+    try {
+        // Load job filter options first time
+        const jobSelect = document.getElementById('captures-job-filter');
+        if (jobSelect.options.length === 1) { // Only has "All Jobs"
+            const jobs = await apiRequest('/jobs/');
+            jobs.forEach(job => {
+                const option = document.createElement('option');
+                option.value = job.id;
+                option.textContent = job.name;
+                jobSelect.appendChild(option);
+            });
+        }
+        
+        await loadCapturesPage();
+    } catch (error) {
+        console.error('Failed to load captures:', error);
+        showNotification('Failed to load captures', 'error');
+    }
+}
+
+async function loadCapturesPage() {
+    try {
+        const query = {
+            page: capturesState.currentPage,
+            page_size: capturesState.pageSize,
+            sort_order: capturesState.sortOrder
+        };
+        
+        if (capturesState.jobFilter) {
+            query.job_id = capturesState.jobFilter;
+        }
+        
+        if (capturesState.startTime) {
+            query.start_time = capturesState.startTime;
+        }
+        
+        if (capturesState.endTime) {
+            query.end_time = capturesState.endTime;
+        }
+        
+        const data = await apiRequest('/captures/', { query });
+        
+        renderCaptures(data.captures);
+        renderPagination(data);
+        updateSelectionControls();
+    } catch (error) {
+        console.error('Failed to load captures page:', error);
+        showNotification('Failed to load captures', 'error');
+    }
+}
+
+function renderCaptures(captures) {
+    const grid = document.getElementById('captures-grid');
+    
+    if (captures.length === 0) {
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--text-secondary);">No captures found</div>';
+        return;
+    }
+    
+    grid.innerHTML = captures.map(capture => `
+        <div class="capture-card ${capturesState.selectedCaptures.has(capture.id) ? 'selected' : ''}" 
+             data-capture-id="${capture.id}"
+             onclick="handleCaptureCardClick(${capture.id}, event)">
+            <input type="checkbox" 
+                   class="capture-checkbox" 
+                   ${capturesState.selectedCaptures.has(capture.id) ? 'checked' : ''}
+                   onclick="event.stopPropagation(); toggleCaptureSelection(${capture.id}, event)">
+            <img src="${API_BASE}/captures/${capture.id}/thumbnail" 
+                 class="capture-thumbnail"
+                 alt="Capture thumbnail"
+                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22112%22%3E%3Crect width=%22200%22 height=%22112%22 fill=%22%231e293b%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23cbd5e1%22 font-family=%22sans-serif%22%3ENo Preview%3C/text%3E%3C/svg%3E'">
+            <div class="capture-info">
+                <div class="capture-job-name">${escapeHtml(capture.job_name || 'Unknown Job')}</div>
+                <div class="capture-time">${formatDateTime(capture.captured_at)}</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderPagination(data) {
+    const container = document.getElementById('captures-pagination');
+    
+    if (data.total_pages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    const currentPage = data.page;
+    const totalPages = data.total_pages;
+    
+    let pages = [];
+    
+    // Always show first page
+    pages.push(1);
+    
+    // Show pages around current page
+    for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+        if (!pages.includes(i)) pages.push(i);
+    }
+    
+    // Always show last page
+    if (totalPages > 1 && !pages.includes(totalPages)) {
+        pages.push(totalPages);
+    }
+    
+    container.innerHTML = `
+        <button onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+            Previous
+        </button>
+        ${pages.map((page, index) => {
+            // Add ellipsis if there's a gap
+            const gap = index > 0 && page - pages[index - 1] > 1 ? '<span class="pagination-ellipsis">...</span>' : '';
+            return `${gap}<button class="${page === currentPage ? 'active' : ''}" onclick="goToPage(${page})">${page}</button>`;
+        }).join('')}
+        <button onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+            Next
+        </button>
+        <span class="pagination-info">
+            Page ${currentPage} of ${totalPages} (${data.total} captures)
+        </span>
+    `;
+}
+
+function goToPage(page) {
+    capturesState.currentPage = page;
+    loadCapturesPage();
+}
+
+function handleCaptureCardClick(captureId, event) {
+    // If any captures are selected (selection mode), toggle this capture's selection
+    if (capturesState.selectedCaptures.size > 0) {
+        toggleCaptureSelection(captureId, event);
+    } else {
+        // If no captures are selected, show preview
+        showCapturePreview(captureId);
+    }
+}
+
+function toggleCaptureSelection(captureId, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    
+    if (capturesState.selectedCaptures.has(captureId)) {
+        capturesState.selectedCaptures.delete(captureId);
+    } else {
+        capturesState.selectedCaptures.add(captureId);
+    }
+    
+    // Update UI
+    const card = document.querySelector(`[data-capture-id="${captureId}"]`);
+    if (card) {
+        card.classList.toggle('selected', capturesState.selectedCaptures.has(captureId));
+        const checkbox = card.querySelector('.capture-checkbox');
+        if (checkbox) {
+            checkbox.checked = capturesState.selectedCaptures.has(captureId);
+        }
+    }
+    updateSelectionControls();
+}
+
+function toggleSelectAllVisibleVisible() {
+    const allCards = document.querySelectorAll('.capture-card');
+    const visibleCaptureIds = Array.from(allCards).map(card => parseInt(card.dataset.captureId));
+    const selectedVisibleCount = visibleCaptureIds.filter(id => capturesState.selectedCaptures.has(id)).length;
+    const allVisibleSelected = visibleCaptureIds.length > 0 && selectedVisibleCount === visibleCaptureIds.length;
+    
+    if (allVisibleSelected) {
+        // Clear selection
+        clearCaptureSelection();
+    } else {
+        // Select all visible
+        allCards.forEach(card => {
+            const captureId = parseInt(card.dataset.captureId);
+            capturesState.selectedCaptures.add(captureId);
+            card.classList.add('selected');
+            const checkbox = card.querySelector('.capture-checkbox');
+            if (checkbox) checkbox.checked = true;
+        });
+        updateSelectionControls();
+    }
+}
+
+function updateSelectionControls() {
+    const controls = document.getElementById('captures-selection-controls');
+    const count = capturesState.selectedCaptures.size;
+    
+    if (count > 0) {
+        controls.style.display = 'flex';
+        document.getElementById('captures-selected-count').textContent = `${count} selected`;
+        
+        // Update toggle button text based on whether all visible are selected
+        const allCards = document.querySelectorAll('.capture-card');
+        const visibleCaptureIds = Array.from(allCards).map(card => parseInt(card.dataset.captureId));
+        const selectedVisibleCount = visibleCaptureIds.filter(id => capturesState.selectedCaptures.has(id)).length;
+        const allVisibleSelected = visibleCaptureIds.length > 0 && selectedVisibleCount === visibleCaptureIds.length;
+        
+        const toggleBtn = document.getElementById('toggle-selection-btn');
+        if (toggleBtn) {
+            toggleBtn.textContent = allVisibleSelected ? 'Clear Selection' : 'Select visible';
+        }
+    } else {
+        controls.style.display = 'none';
+    }
+}
+
+function toggleSelectAllVisible() {
+    const allCards = document.querySelectorAll('.capture-card');
+    const visibleCaptureIds = Array.from(allCards).map(card => parseInt(card.dataset.captureId));
+    const selectedVisibleCount = visibleCaptureIds.filter(id => capturesState.selectedCaptures.has(id)).length;
+    const allVisibleSelected = visibleCaptureIds.length > 0 && selectedVisibleCount === visibleCaptureIds.length;
+    
+    if (allVisibleSelected) {
+        // Clear selection
+        clearCaptureSelection();
+    } else {
+        // Select all visible
+        allCards.forEach(card => {
+            const captureId = parseInt(card.dataset.captureId);
+            capturesState.selectedCaptures.add(captureId);
+            card.classList.add('selected');
+            const checkbox = card.querySelector('.capture-checkbox');
+            if (checkbox) checkbox.checked = true;
+        });
+        updateSelectionControls();
+    }
+}
+
+function clearCaptureSelection() {
+    capturesState.selectedCaptures.clear();
+    document.querySelectorAll('.capture-card').forEach(card => card.classList.remove('selected'));
+    document.querySelectorAll('.capture-checkbox').forEach(cb => cb.checked = false);
+    updateSelectionControls();
+}
+
+function applyCaptureSortAndFilter() {
+    const jobFilter = getValue('captures-job-filter');
+    const startTime = getValue('captures-start-time');
+    const endTime = getValue('captures-end-time');
+    const sortOrder = getValue('captures-sort-order');
+    const pageSize = getValue('captures-page-size');
+    
+    capturesState.jobFilter = jobFilter || null;
+    capturesState.startTime = startTime ? new Date(startTime).toISOString() : null;
+    capturesState.endTime = endTime ? new Date(endTime).toISOString() : null;
+    capturesState.sortOrder = sortOrder || 'asc';
+    capturesState.pageSize = parseInt(pageSize) || 16;
+    capturesState.currentPage = 1; // Reset to first page
+    
+    loadCapturesPage();
+}
+
+function clearCaptureFilters() {
+    setValue('captures-job-filter', '');
+    setValue('captures-start-time', '');
+    setValue('captures-end-time', '');
+    capturesState.jobFilter = null;
+    capturesState.startTime = null;
+    capturesState.endTime = null;
+    capturesState.currentPage = 1;
+    loadCapturesPage();
+}
+
+async function showCapturePreview(captureId) {
+    try {
+        const capture = await apiRequest(`/captures/${captureId}`);
+        
+        capturesState.currentCaptureId = captureId;
+        
+        // Populate modal
+        document.getElementById('capture-preview-image').src = `${API_BASE}/captures/${captureId}/image`;
+        document.getElementById('capture-detail-job').innerHTML = `<a href="#" onclick="showJobDetails(${capture.job_id}); closeModal('capture-preview-modal'); return false;" style="color: var(--primary-color); text-decoration: underline;">${escapeHtml(capture.job_name || 'Unknown Job')}</a>`;
+        document.getElementById('capture-detail-time').textContent = formatDateTime(capture.captured_at);
+        document.getElementById('capture-detail-size').textContent = formatBytes(capture.file_size);
+        document.getElementById('capture-detail-path').textContent = capture.file_path;
+        
+        document.getElementById('capture-preview-modal').classList.add('active');
+    } catch (error) {
+        console.error('Failed to load capture preview:', error);
+        showNotification(`Failed to load capture preview: ${error.message}`, 'error');
+    }
+}
+
+function closeCapturePreview() {
+    document.getElementById('capture-preview-modal').classList.remove('active');
+    capturesState.currentCaptureId = null;
+}
+
+function deleteSingleCapture() {
+    if (!capturesState.currentCaptureId) return;
+    
+    showConfirm('Are you sure you want to delete this capture? This action cannot be undone.', async (confirmed) => {
+        if (!confirmed) return;
+        
+        try {
+            await apiRequest(`/captures/${capturesState.currentCaptureId}`, { method: 'DELETE' });
+            showNotification('Capture deleted successfully', 'success');
+            closeCapturePreview();
+            loadCapturesPage();
+        } catch (error) {
+            console.error('Failed to delete capture:', error);
+            showNotification('Failed to delete capture', 'error');
+        }
+    });
+}
+
+function deleteSelectedCaptures() {
+    const count = capturesState.selectedCaptures.size;
+    if (count === 0) return;
+    
+    const message = `Are you sure you want to delete ${count} capture${count > 1 ? 's' : ''}? This action cannot be undone.`;
+    
+    showConfirm(message, async (confirmed) => {
+        if (!confirmed) return;
+        
+        try {
+            const captureIds = Array.from(capturesState.selectedCaptures);
+            const result = await apiRequest('/captures/delete-multiple', {
+                method: 'POST',
+                body: { capture_ids: captureIds }
+            });
+            
+            if (result.errors && result.errors.length > 0) {
+                showNotification(`Deleted ${result.deleted} of ${result.requested} captures. Some errors occurred.`, 'warning');
+                console.error('Deletion errors:', result.errors);
+            } else {
+                showNotification(`Successfully deleted ${result.deleted} capture${result.deleted > 1 ? 's' : ''}`, 'success');
+            }
+            
+            clearCaptureSelection();
+            loadCapturesPage();
+        } catch (error) {
+            console.error('Failed to delete captures:', error);
+            showNotification('Failed to delete captures', 'error');
+        }
+    });
+}
+
+// Helper to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function viewJobCaptures(jobId) {
+    // Close job details modal if open
+    const modal = document.getElementById('job-details-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    
+    // Set the job filter in state AND dropdown BEFORE switching view
+    capturesState.jobFilter = jobId;
+    capturesState.currentPage = 1;
+    
+    // Ensure dropdown is populated and set to the correct value
+    const jobSelect = document.getElementById('captures-job-filter');
+    if (jobSelect && jobSelect.options.length === 1) {
+        // Need to populate dropdown first
+        const jobs = await apiRequest('/jobs/');
+        jobs.forEach(job => {
+            const option = document.createElement('option');
+            option.value = job.id;
+            option.textContent = job.name;
+            jobSelect.appendChild(option);
+        });
+    }
+    
+    // Set dropdown value to match the filter
+    setValue('captures-job-filter', jobId);
+    
+    // Switch to captures view (this calls loadCaptures which will use the filter we just set)
+    switchView('captures', true);
+}
+
+
