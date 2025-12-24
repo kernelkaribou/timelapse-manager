@@ -250,7 +250,9 @@ document.addEventListener('DOMContentLoaded', () => {
             captureRange.style.display = 'flex';
             startTimeInput.disabled = false;
             endTimeInput.disabled = false;
+            
             // Update duration estimate for the selected time range
+            // Don't dispatch change events - hidden fields already have correct timestamps
             setTimeout(() => updateVideoDurationEstimate(), 100);
         } else {
             captureRange.style.display = 'none';
@@ -275,6 +277,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, 300));
     }
+    
+    // Setup duration estimate listeners for job creation form
+    const jobCreationEstimateFields = ['start_datetime', 'end_datetime', 'interval_seconds', 'framerate', 
+                                       'time_window_enabled', 'time_window_start', 'time_window_end'];
+    jobCreationEstimateFields.forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            element.addEventListener('change', updateDurationEstimate);
+            element.addEventListener('input', updateDurationEstimate);
+        }
+    });
+    
+    // Trigger initial duration estimate
+    updateDurationEstimate();
     
     // Prevent Enter key from submitting forms
     document.querySelectorAll('form').forEach(form => {
@@ -1257,6 +1273,10 @@ async function showProcessVideoModal(jobId, jobName) {
         
         const captureCount = timeRange.count;
         
+        // Store original timestamp strings for API queries
+        window.firstCaptureTimeStr = timeRange.first_capture_time;
+        window.lastCaptureTimeStr = timeRange.last_capture_time;
+        
         // Generate timestamp in the same format as backend (YYYYMMDD_HHMMSS)
         const now = new Date();
         const timestamp = now.getFullYear() +
@@ -1280,7 +1300,7 @@ async function showProcessVideoModal(jobId, jobName) {
         
         // Set time range inputs to first and last capture times
         if (captureCount > 0) {
-            // Parse ISO timestamps and set date/time pickers
+            // Parse ISO timestamps - use capture times as they represent actual available data
             const firstDate = new Date(timeRange.first_capture_time);
             const lastDate = new Date(timeRange.last_capture_time);
             
@@ -1347,9 +1367,20 @@ async function showProcessVideoModal(jobId, jobName) {
             setupDateTimePickerSyncWithTimeInput('video_start', 'video_start_datetime');
             setupDateTimePickerSyncWithTimeInput('video_end', 'video_end_datetime');
             
-            // Trigger sync to update hidden inputs with current values
-            if (startDateInput) startDateInput.dispatchEvent(new Event('change'));
-            if (endDateInput) endDateInput.dispatchEvent(new Event('change'));
+            // Manually sync the initial values to hidden fields
+            const startHidden = document.getElementById('video_start_datetime');
+            const endHidden = document.getElementById('video_end_datetime');
+            if (startHidden && window.firstCaptureTimeStr) {
+                // Store the original timestamp string from API for accurate queries
+                startHidden.value = window.firstCaptureTimeStr;
+            }
+            if (endHidden && window.lastCaptureTimeStr) {
+                // Store the original timestamp string from API for accurate queries
+                endHidden.value = window.lastCaptureTimeStr;
+            }
+            
+            // Don't trigger change events - we've manually set the correct timestamps above
+            // and don't want the sync function to overwrite them
             
             // Set up event listeners for duration updates when time range changes
             const updateDuration = debounce(updateVideoDurationEstimate, 300);
@@ -1400,8 +1431,9 @@ function updateVideoDurationEstimate() {
             return;
         }
         
-        const startTimeStr = toISOStringForQuery(startTimeInput.value, false);
-        const endTimeStr = toISOStringForQuery(endTimeInput.value, true);
+        // Use the timestamp strings directly - they already have timezone info
+        const startTimeStr = startTimeInput.value;
+        const endTimeStr = endTimeInput.value;
         
         fetch(`${API_BASE}/captures/job/${window.currentJobId}/time-range?start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`)
             .then(r => r.json())
@@ -1524,8 +1556,8 @@ async function processVideo(event) {
         framerate: parseInt(document.getElementById('video_framerate').value),
         quality: document.getElementById('video_quality').value,
         output_path: document.getElementById('video_output_path').value.trim() || null,
-        start_time: useRange ? toISOStringForQuery(document.getElementById('video_start_datetime').value, false) : null,
-        end_time: useRange ? toISOStringForQuery(document.getElementById('video_end_datetime').value, true) : null
+        start_time: useRange ? document.getElementById('video_start_datetime').value : null,
+        end_time: useRange ? document.getElementById('video_end_datetime').value : null
     };
     
     try {
@@ -1678,7 +1710,11 @@ function showCreateJobModal() {
     document.getElementById('test-result').innerHTML = '';
     document.getElementById('duration-estimate').innerHTML = '';
     
-    // Set default datetime to now
+    // Setup datetime picker sync for start and end dates BEFORE setting values
+    setupDateTimePickerSyncWithTimeInput('start', 'start_datetime');
+    setupDateTimePickerSyncWithTimeInput('end', 'end_datetime');
+    
+    // Set default datetime to now (this will now trigger the sync)
     setDefaultStartTime();
     
     // Set default values for capture path and naming pattern
@@ -1892,12 +1928,38 @@ function calculateAndDisplayDuration(options) {
                     dayWindowEnd.setDate(dayWindowEnd.getDate() + 1);
                 }
                 
-                const windowDuration = Math.min(dayWindowEnd, jobEnd) - Math.max(dayWindowStart, current);
+                // If current time is already past today's window end, move to next day's window start
+                if (current >= dayWindowEnd) {
+                    // Advance to next day at the window start time
+                    const nextDay = new Date(currentDay);
+                    nextDay.setDate(nextDay.getDate() + 1);
+                    nextDay.setHours(startHour, startMin, 0, 0);
+                    current = nextDay;
+                    continue;
+                }
+                
+                // If current time is before today's window start, move to window start
+                if (current < dayWindowStart) {
+                    current = new Date(dayWindowStart);
+                }
+                
+                // Calculate the actual capture window for this day
+                // Must be within both the daily time window AND the job duration
+                const effectiveStart = current;
+                const effectiveEnd = Math.min(dayWindowEnd, jobEnd);
+                const windowDuration = effectiveEnd - effectiveStart;
+                
                 if (windowDuration > 0) {
                     totalCaptures += Math.floor((windowDuration / 1000) / interval);
                 }
                 
-                current = new Date(dayWindowEnd);
+                // Move to the next day's window start
+                const nextDay = new Date(dayWindowEnd);
+                if (!windowSpansMidnight) {
+                    nextDay.setDate(nextDay.getDate() + 1);
+                    nextDay.setHours(startHour, startMin, 0, 0);
+                }
+                current = nextDay;
             }
             
             return totalCaptures;
@@ -1999,14 +2061,6 @@ function updateEditDurationEstimate() {
         displayElementId: 'edit-duration-estimate'
     });
 }
-
-// Trigger initial estimate for job creation
-const jobCreationEstimateFields = ['start_datetime', 'end_datetime', 'interval_seconds', 'framerate', 
-                                   'time_window_enabled', 'time_window_start', 'time_window_end'];
-jobCreationEstimateFields.forEach(fieldId => {
-    document.getElementById(fieldId)?.addEventListener('change', updateDurationEstimate);
-    document.getElementById(fieldId)?.addEventListener('input', updateDurationEstimate);
-});
 
 // Close modals on outside click
 window.onclick = function(event) {
@@ -2604,7 +2658,19 @@ function setupDateTimePickerSyncWithTimeInput(baseId, hiddenId) {
         const time = timeInput.value;
         
         if (date && time) {
-            hiddenInput.value = `${date}T${time}`;
+            // Create a Date object to get proper timezone offset
+            const dt = new Date(`${date}T${time}`);
+            // Format with timezone offset (e.g., 2025-12-23T18:45:00-06:00)
+            const year = dt.getFullYear();
+            const month = String(dt.getMonth() + 1).padStart(2, '0');
+            const day = String(dt.getDate()).padStart(2, '0');
+            const hours = String(dt.getHours()).padStart(2, '0');
+            const minutes = String(dt.getMinutes()).padStart(2, '0');
+            const offset = -dt.getTimezoneOffset();
+            const offsetHours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+            const offsetMinutes = String(Math.abs(offset) % 60).padStart(2, '0');
+            const offsetSign = offset >= 0 ? '+' : '-';
+            hiddenInput.value = `${year}-${month}-${day}T${hours}:${minutes}:00${offsetSign}${offsetHours}:${offsetMinutes}`;
         } else {
             hiddenInput.value = '';
         }
