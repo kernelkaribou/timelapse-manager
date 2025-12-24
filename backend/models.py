@@ -53,7 +53,8 @@ class JobCreate(BaseModel):
                 raise ValueError(f"End date must be at least {self.interval_seconds} seconds after start date")
             
             # End date must be in the future
-            now = datetime.now()
+            from .utils import get_now
+            now = get_now()
             if self.end_datetime < now:
                 raise ValueError("End date must be in the future")
         
