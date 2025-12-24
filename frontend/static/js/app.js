@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
             startTimeInput.disabled = false;
             endTimeInput.disabled = false;
             // Update duration estimate for the selected time range
-            updateVideoDurationEstimate();
+            setTimeout(() => updateVideoDurationEstimate(), 100);
         } else {
             captureRange.style.display = 'none';
             startTimeInput.disabled = true;
@@ -260,6 +260,21 @@ document.addEventListener('DOMContentLoaded', () => {
             updateVideoDurationEstimate();
         }
     });
+    
+    // Setup framerate change listener for video modal
+    const videoFramerateInput = document.getElementById('video_framerate');
+    if (videoFramerateInput) {
+        videoFramerateInput.addEventListener('change', () => {
+            if (window.currentJobId) {
+                updateVideoDurationEstimate();
+            }
+        });
+        videoFramerateInput.addEventListener('input', debounce(() => {
+            if (window.currentJobId) {
+                updateVideoDurationEstimate();
+            }
+        }, 300));
+    }
     
     // Prevent Enter key from submitting forms
     document.querySelectorAll('form').forEach(form => {
@@ -1269,6 +1284,10 @@ async function showProcessVideoModal(jobId, jobName) {
             const firstDate = new Date(timeRange.first_capture_time);
             const lastDate = new Date(timeRange.last_capture_time);
             
+            // Store globally for validation
+            window.firstCaptureTime = firstDate;
+            window.lastCaptureTime = lastDate;
+            
             // Display available time range in 24-hour format
             const rangeInfo = document.getElementById('available-range-info');
             const rangeSpan = document.getElementById('capture-time-range');
@@ -1293,7 +1312,12 @@ async function showProcessVideoModal(jobId, jobName) {
             const startDateInput = document.getElementById('video_start_date');
             const startTimeInput = document.getElementById('video_start_time');
             
-            if (startDateInput) startDateInput.value = firstDate.toISOString().split('T')[0];
+            if (startDateInput) {
+                const year = firstDate.getFullYear();
+                const month = String(firstDate.getMonth() + 1).padStart(2, '0');
+                const day = String(firstDate.getDate()).padStart(2, '0');
+                startDateInput.value = `${year}-${month}-${day}`;
+            }
             if (startTimeInput) {
                 const hours = String(firstDate.getHours()).padStart(2, '0');
                 const minutes = String(firstDate.getMinutes()).padStart(2, '0');
@@ -1304,34 +1328,50 @@ async function showProcessVideoModal(jobId, jobName) {
             const endDateInput = document.getElementById('video_end_date');
             const endTimeInput = document.getElementById('video_end_time');
             
-            if (endDateInput) endDateInput.value = lastDate.toISOString().split('T')[0];
+            if (endDateInput) {
+                const year = lastDate.getFullYear();
+                const month = String(lastDate.getMonth() + 1).padStart(2, '0');
+                const day = String(lastDate.getDate()).padStart(2, '0');
+                endDateInput.value = `${year}-${month}-${day}`;
+            }
             if (endTimeInput) {
                 const hours = String(lastDate.getHours()).padStart(2, '0');
                 const minutes = String(lastDate.getMinutes()).padStart(2, '0');
                 endTimeInput.value = `${hours}:${minutes}`;
             }
             
-            // Trigger sync to update hidden inputs
-            if (startDateInput) startDateInput.dispatchEvent(new Event('change'));
-            if (endDateInput) endDateInput.dispatchEvent(new Event('change'));
-            
             // Store job ID for time range queries
             window.currentJobId = jobId;
             
-            // Set up event listener for duration updates when time range changes
-            // Use a named function so we can add it once
+            // Set up datetime picker sync for video time range inputs
+            setupDateTimePickerSyncWithTimeInput('video_start', 'video_start_datetime');
+            setupDateTimePickerSyncWithTimeInput('video_end', 'video_end_datetime');
+            
+            // Trigger sync to update hidden inputs with current values
+            if (startDateInput) startDateInput.dispatchEvent(new Event('change'));
+            if (endDateInput) endDateInput.dispatchEvent(new Event('change'));
+            
+            // Set up event listeners for duration updates when time range changes
             const updateDuration = debounce(updateVideoDurationEstimate, 300);
             
-            // Store reference to clean up later
-            window._videoModalListeners = {
-                startTime: () => updateDuration(),
-                endTime: () => updateDuration()
-            };
+            const startTimeHidden = document.getElementById('video_start_datetime');
+            const endTimeHidden = document.getElementById('video_end_datetime');
             
-            const startTimeHidden = document.getElementById('start_time');
-            const endTimeHidden = document.getElementById('end_time');
-            if (startTimeHidden) startTimeHidden.addEventListener('change', window._videoModalListeners.startTime);
-            if (endTimeHidden) endTimeHidden.addEventListener('change', window._videoModalListeners.endTime);
+            // Attach listeners to visible date/time inputs
+            [startDateInput, startTimeInput, endDateInput, endTimeInput].forEach(input => {
+                if (input) {
+                    input.addEventListener('change', updateDuration);
+                    input.addEventListener('input', updateDuration);
+                }
+            });
+            
+            // Attach listeners to hidden combined datetime inputs
+            [startTimeHidden, endTimeHidden].forEach(input => {
+                if (input) {
+                    input.addEventListener('change', updateDuration);
+                    input.addEventListener('input', updateDuration);
+                }
+            });
         }
         
         // Reset the use_range checkbox
@@ -1350,30 +1390,24 @@ async function showProcessVideoModal(jobId, jobName) {
 
 function updateVideoDurationEstimate() {
     const framerate = parseInt(document.getElementById('video_framerate').value) || 30;
-    const useRange = document.getElementById('use_range').checked;
+    const useRange = document.getElementById('use_range')?.checked;
     
-    // If custom time range is selected, fetch count for that range
     if (useRange) {
-        const startTimeInput = document.getElementById('start_time');
-        const endTimeInput = document.getElementById('end_time');
+        const startTimeInput = document.getElementById('video_start_datetime');
+        const endTimeInput = document.getElementById('video_end_datetime');
         
-        if (!startTimeInput.value || !endTimeInput.value || !window.currentJobId) return;
+        if (!startTimeInput?.value || !endTimeInput?.value || !window.currentJobId) {
+            return;
+        }
         
-        // Convert input times to ISO strings for API query
         const startTimeStr = toISOStringForQuery(startTimeInput.value, false);
         const endTimeStr = toISOStringForQuery(endTimeInput.value, true);
         
-        // Query the backend for capture count in this time range
         fetch(`${API_BASE}/captures/job/${window.currentJobId}/time-range?start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`)
             .then(r => r.json())
-            .then(data => {
-                displayDurationEstimate(data.count, framerate);
-            })
-            .catch(error => {
-                console.error('Failed to get capture count:', error);
-            });
+            .then(data => displayDurationEstimate(data.count, framerate))
+            .catch(error => console.error('Failed to get capture count:', error));
     } else {
-        // Use full capture count from data attribute
         const captureCount = parseInt(document.getElementById('video_framerate').getAttribute('data-capture-count')) || 0;
         displayDurationEstimate(captureCount, framerate);
     }
@@ -1381,9 +1415,35 @@ function updateVideoDurationEstimate() {
 
 function displayDurationEstimate(captureCount, framerate) {
     const createBtn = document.getElementById('create-video-btn');
+    const useRange = document.getElementById('use_range')?.checked;
+    
+    // Validate custom time range against available captures
+    if (useRange && window.firstCaptureTime && window.lastCaptureTime) {
+        const startTimeInput = document.getElementById('video_start_datetime');
+        const endTimeInput = document.getElementById('video_end_datetime');
+        
+        if (startTimeInput?.value && endTimeInput?.value) {
+            const customStart = new Date(startTimeInput.value);
+            const customEnd = new Date(endTimeInput.value);
+            
+            if (customEnd < window.firstCaptureTime || customStart > window.lastCaptureTime) {
+                document.getElementById('video-duration-estimate').innerHTML = 
+                    '<p style="color: #dc3545; font-weight: 600;"><strong>Warning:</strong> Selected time range is outside available captures!</p>' +
+                    '<p style="color: #dc3545; font-size: 0.875rem;">Available: ' + 
+                    formatDateTime(window.firstCaptureTime.toISOString()) + ' - ' + 
+                    formatDateTime(window.lastCaptureTime.toISOString()) + '</p>';
+                
+                if (createBtn) {
+                    createBtn.disabled = true;
+                    createBtn.style.opacity = '0.5';
+                    createBtn.style.cursor = 'not-allowed';
+                }
+                return;
+            }
+        }
+    }
     
     if (captureCount === 0) {
-        const useRange = document.getElementById('use_range').checked;
         const message = useRange 
             ? '<p style="color: #dc3545; font-weight: 600;"><strong>Warning:</strong> No captures in selected time range!</p>'
             : '<p style="color: var(--text-secondary);">No captures available for this job yet.</p>';
@@ -1464,8 +1524,8 @@ async function processVideo(event) {
         framerate: parseInt(document.getElementById('video_framerate').value),
         quality: document.getElementById('video_quality').value,
         output_path: document.getElementById('video_output_path').value.trim() || null,
-        start_time: useRange ? toISOStringForQuery(document.getElementById('start_time').value, false) : null,
-        end_time: useRange ? toISOStringForQuery(document.getElementById('end_time').value, true) : null
+        start_time: useRange ? toISOStringForQuery(document.getElementById('video_start_datetime').value, false) : null,
+        end_time: useRange ? toISOStringForQuery(document.getElementById('video_end_datetime').value, true) : null
     };
     
     try {
@@ -1564,22 +1624,49 @@ function closeModal(modalId) {
     if (modalId === 'create-job-modal') {
         document.getElementById('create-job-form').reset();
         document.getElementById('test-result').innerHTML = '';
-        document.getElementById('duration-estimate').innerHTML = '';
         // Reset datetime to now for next time modal opens
         setDefaultStartTime();
     }
     
     // Clean up video modal listeners to prevent memory leaks
     if (modalId === 'process-video-modal' && window._videoModalListeners) {
+        const startDateInput = document.getElementById('video_start_date');
+        const startTimeInput = document.getElementById('video_start_time');
+        const endDateInput = document.getElementById('video_end_date');
+        const endTimeInput = document.getElementById('video_end_time');
         const startTimeHidden = document.getElementById('start_time');
         const endTimeHidden = document.getElementById('end_time');
-        if (startTimeHidden && window._videoModalListeners.startTime) {
-            startTimeHidden.removeEventListener('change', window._videoModalListeners.startTime);
+        
+        // Remove both change and input listeners
+        if (startDateInput && window._videoModalListeners.startDate) {
+            startDateInput.removeEventListener('change', window._videoModalListeners.startDate);
+            startDateInput.removeEventListener('input', window._videoModalListeners.startDate);
         }
-        if (endTimeHidden && window._videoModalListeners.endTime) {
-            endTimeHidden.removeEventListener('change', window._videoModalListeners.endTime);
+        if (startTimeInput && window._videoModalListeners.startTime) {
+            startTimeInput.removeEventListener('change', window._videoModalListeners.startTime);
+            startTimeInput.removeEventListener('input', window._videoModalListeners.startTime);
         }
+        if (endDateInput && window._videoModalListeners.endDate) {
+            endDateInput.removeEventListener('change', window._videoModalListeners.endDate);
+            endDateInput.removeEventListener('input', window._videoModalListeners.endDate);
+        }
+        if (endTimeInput && window._videoModalListeners.endTime) {
+            endTimeInput.removeEventListener('change', window._videoModalListeners.endTime);
+            endTimeInput.removeEventListener('input', window._videoModalListeners.endTime);
+        }
+        if (startTimeHidden && window._videoModalListeners.hiddenStart) {
+            startTimeHidden.removeEventListener('change', window._videoModalListeners.hiddenStart);
+            startTimeHidden.removeEventListener('input', window._videoModalListeners.hiddenStart);
+        }
+        if (endTimeHidden && window._videoModalListeners.hiddenEnd) {
+            endTimeHidden.removeEventListener('change', window._videoModalListeners.hiddenEnd);
+            endTimeHidden.removeEventListener('input', window._videoModalListeners.hiddenEnd);
+        }
+        
         window._videoModalListeners = null;
+        window.currentJobId = null;
+        window.firstCaptureTime = null;
+        window.lastCaptureTime = null;
     }
 }
 
@@ -2442,14 +2529,10 @@ function populateMinuteOptions(selectId) {
 }
 
 function initializeTimePickers() {
-    // Setup universal time input sync for all time pickers
-    // Used consistently across all forms: job creation, editing, and video processing
+    // Setup universal time input sync for time window fields only
+    // Date/time pickers are set up per-modal to avoid conflicts
     setupTimeInputSync('time_window_start');
     setupTimeInputSync('time_window_end');
-    setupDateTimePickerSyncWithTimeInput('start', 'start_datetime');
-    setupDateTimePickerSyncWithTimeInput('end', 'end_datetime');
-    setupDateTimePickerSyncWithTimeInput('video_start', 'start_time');
-    setupDateTimePickerSyncWithTimeInput('video_end', 'end_time');
     
     // Set default start time to now
     setDefaultStartTime();
@@ -2512,7 +2595,9 @@ function setupDateTimePickerSyncWithTimeInput(baseId, hiddenId) {
     const timeInput = document.getElementById(`${baseId}_time`);
     const hiddenInput = document.getElementById(hiddenId);
     
-    if (!dateInput || !timeInput || !hiddenInput) return;
+    if (!dateInput || !timeInput || !hiddenInput) {
+        return;
+    }
     
     const syncValue = () => {
         const date = dateInput.value;
@@ -2523,12 +2608,14 @@ function setupDateTimePickerSyncWithTimeInput(baseId, hiddenId) {
         } else {
             hiddenInput.value = '';
         }
-        // Dispatch change event so listeners on hidden input get notified
         hiddenInput.dispatchEvent(new Event('change'));
+        hiddenInput.dispatchEvent(new Event('input'));
     };
     
     dateInput.addEventListener('change', syncValue);
+    dateInput.addEventListener('input', syncValue);
     timeInput.addEventListener('change', syncValue);
+    timeInput.addEventListener('input', syncValue);
 }
 
 function setDefaultStartTime() {
